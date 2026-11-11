@@ -2,7 +2,9 @@
 
 基于 [Semiconductor Data Analyzer](https://github.com/ttt3t/semiconductor-data-analyzer) 的 STDF / CSV 阈值修改与 DUT 良率重判工具。
 
-**状态：源码基线与修订方案已准备，功能开发尚未完成。** 当前继承的是原项目 2.0.12 源码，不能将原分析器功能视为下列新功能已经实现。
+**状态：源码基线与完整改造方案已准备，功能开发尚未完成。** 当前继承的是原项目 2.0.12 源码，不能将原分析器功能视为下列新功能已经实现。
+
+**开发入口：[完整改造方案](Docs/RejudgePlan.md)**，已整合用户最后确认的“默认有效项”规则及全部补充要求。
 
 ## 修订后的目标
 
@@ -13,7 +15,7 @@
 - 设置中指定 Pass / PartialPass 的 SBIN 与 HBIN，受调整影响的 DUT 两个 BIN 同时更新；未受影响记录保留原 BIN。
 - 导出真实修改后的 STDF / STD / gzip 或 CSV，保留测量值与测试历史，并同步相关汇总。
 
-完整定义、补充建议、写出约束和开发顺序见 [修订方案](Docs/RejudgePlan.md)。
+完整定义、补充建议、写出约束和开发顺序见 [完整改造方案](Docs/RejudgePlan.md)。
 
 ## 源码基线
 
