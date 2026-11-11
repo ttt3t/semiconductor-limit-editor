@@ -47,6 +47,7 @@ public partial class MainWindow
         {
             var merged = await ReadImportAsync(() => DatasetService.AppendSources(_data, sources, _config));
             var prepared = await PrepareAnalysisAsync(merged, _config);
+            if (_rejudge != null) LimitExportService.ApplyPlan(prepared.Rejudge, _rejudge.Rules.Values);
             CommitAnalysis(merged, prepared);
             _sources.AddRange(sources);
             RefreshStdfInformationSources();

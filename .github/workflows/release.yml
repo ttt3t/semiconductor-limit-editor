@@ -19,14 +19,18 @@ jobs:
       - name: Portable adjudication and data regressions
         shell: bash
         run: |
-          bash Tests/run-rejudge.sh
-          bash Tests/run-core-memory.sh
-          bash Tests/run-good-retest.sh
-          bash Tests/run-import-progress.sh
-          bash Tests/run-stdf-numbering.sh
-          bash Tests/run-scatter-raster.sh
-          bash Tests/run-column-search.sh
-          bash Tests/run-map-table-copy.sh
+          mkdir -p artifacts
+          set +e
+          for suite in rejudge core-memory good-retest import-progress stdf-numbering scatter-raster column-search map-table-copy; do
+            bash "Tests/run-$suite.sh" > "artifacts/$suite.log" 2>&1
+            result=$?
+            tail -n 8 "artifacts/$suite.log"
+            echo "### $suite (exit $result)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 35 "artifacts/$suite.log" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" -ne 0 ]; then exit "$result"; fi
+          done
       - name: Publish framework-dependent Windows x64 executable
         shell: pwsh
         run: |
@@ -39,7 +43,7 @@ jobs:
           $exe = Join-Path $PWD 'artifacts/win-x64-framework-dependent/SemiconductorLimitEditor.exe'
           $process = Start-Process $exe -ArgumentList '--smoke-test', ('"' + $log + '"') -PassThru
           if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'WPF smoke test timed out' }
-          if (Test-Path $log) { Get-Content $log }
+          if (Test-Path $log) { Get-Content $log; Add-Content $env:GITHUB_STEP_SUMMARY '### WPF smoke test'; Get-Content $log | Add-Content $env:GITHUB_STEP_SUMMARY }
           if ($process.ExitCode -ne 0 -or -not (Test-Path $log) -or -not (Select-String -Path $log -SimpleMatch 'ALL WPF REJUDGE SMOKE CHECKS PASSED')) { throw 'WPF smoke test failed' }
       - name: Package executable, configuration and documentation
         shell: pwsh

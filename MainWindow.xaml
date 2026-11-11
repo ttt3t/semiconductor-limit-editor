@@ -494,10 +494,10 @@
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
                         <DataGridTemplateColumn Header="新 LSL" Width="95" SortMemberPath="Rule.NewLowText">
-                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewLowText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="显示单位下的新下限；留空清除；可直接粘贴。STDF 使用实际 R*4 值。"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewLowText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="{Binding Rule.WritableLimitsText}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
                         <DataGridTemplateColumn Header="新 USL" Width="95" SortMemberPath="Rule.NewHighText">
-                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewHighText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="显示单位下的新上限；留空清除；可直接粘贴。"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewHighText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="{Binding Rule.WritableLimitsText}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
                         <DataGridTemplateColumn Header="良率变化" Width="100" SortMemberPath="YieldChange">
                             <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding YieldChange}" ToolTip="{Binding YieldDetail}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>

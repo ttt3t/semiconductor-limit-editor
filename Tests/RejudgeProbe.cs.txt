@@ -75,6 +75,28 @@ static class Probe
         string changed = Path.Combine(root, "changed"); Reject<IOException>(() => LimitExportService.ExportBundle(changed, new[] { new CsvImportSource(path) }, c, s, s.Fingerprints), "source fingerprint changes prevent stale export");
         Check(!Directory.Exists(changed), "failed bundle leaves no published partial output");
     }
+    static void NormalizedAndEncoding()
+    {
+        string path = Path.Combine(root, "no-limits.csv");
+        File.WriteAllText(path, "SN,X,Y,Site,SBIN,HBIN,Wafer,Value\nA,0,0,1,1,1,W,1.000000\nB,1,0,1,2,2,W,3.000000\n", new UTF8Encoding(false));
+        var c = Config(); c.LowLimitRow = c.HighLimitRow = c.UnitRow = c.TestNumberRow = 0; c.DataStartRow = 2;
+        var data = DataFileService.Parse(path, c); using var lease = new DatasetLease(data.Records); var session = new RejudgeSession(data, new());
+        string dest = Path.Combine(root, "normalized"); LimitExportService.ExportBundle(dest, new[] { new CsvImportSource(path) }, c, session, session.Fingerprints);
+        string output = Path.Combine(dest, "001_no-limits.normalized.csv");
+        Check(File.Exists(output) && File.Exists(output + ".ini"), "missing limit rows explicitly produce normalized CSV and matching layout");
+        var restored = DataFileService.Parse(output, ConfigLoader.Load(output + ".ini")); using var lease2 = new DatasetLease(restored.Records);
+        Check(restored.Records.Count == 2 && restored.Records[1].SBin == "1" && restored.Records[1].HBin == "1" && restored.Records[1].Measurements.Values.Single() == "3.000000", "normalized output reimports with actual bins and exact measurement text");
+        string encoded = Path.Combine(root, "gbk.csv"); var gbk = CsvText.EncodingFor("GB18030");
+        File.WriteAllText(encoded, "SN;X;Y;Site;SBIN;HBIN;Wafer;电压\r\nLSL;;;;;;;0\r\nUSL;;;;;;;2\r\nUNIT;;;;;;;V\r\nNUM;;;;;;;101\r\n甲;0;0;1;1;1;晶圆;1.000000\r\n乙;1;0;1;2;2;晶圆;3.000000\r\n", gbk);
+        var ec = Config(); ec.EncodingName = "GB18030"; ec.Delimiter = ';';
+        var ed = DataFileService.Parse(encoded, ec); using var lease3 = new DatasetLease(ed.Records); var es = new RejudgeSession(ed, new()); es.Rules.Values.Single().NewHighText = "4";
+        string edir = Path.Combine(root, "encoded"); LimitExportService.ExportBundle(edir, new[] { new CsvImportSource(encoded) }, ec, es, es.Fingerprints);
+        string etext = File.ReadAllText(Path.Combine(edir, "001_gbk.csv"), gbk);
+        Check(etext.Contains("乙;1;0;1;1;1;晶圆;3.000000\r\n"), "GB18030, semicolon, non-ASCII identities and raw numeric text preserved");
+        var canceled = new CancellationToken(true); string stopped = Path.Combine(root, "canceled");
+        Reject<OperationCanceledException>(() => LimitExportService.ExportBundle(stopped, new[] { new CsvImportSource(encoded) }, ec, es, es.Fingerprints, canceled), "export cancellation stops publication");
+        Check(!Directory.Exists(stopped), "canceled export removes staged bundle");
+    }
     static string Fixture(bool big, bool gzip)
     {
         string path = Path.Combine(root, $"{big}-{gzip}.stdf" + (gzip ? ".gz" : ""));
@@ -144,7 +166,7 @@ static class Probe
     }
     static int Main(string[] args)
     {
-        try { root = Path.GetFullPath(args[0]); if (Directory.Exists(root)) Directory.Delete(root, true); Directory.CreateDirectory(root); Rules(); Csv(); foreach (bool big in new[] { false, true }) foreach (bool gzip in new[] { false, true }) Native(big, gzip); Console.WriteLine($"ALL {checks} REJUDGE CHECKS PASSED"); return 0; }
+        try { root = Path.GetFullPath(args[0]); if (Directory.Exists(root)) Directory.Delete(root, true); Directory.CreateDirectory(root); Rules(); Csv(); NormalizedAndEncoding(); foreach (bool big in new[] { false, true }) foreach (bool gzip in new[] { false, true }) Native(big, gzip); Console.WriteLine($"ALL {checks} REJUDGE CHECKS PASSED"); return 0; }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
 }

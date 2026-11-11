@@ -572,7 +572,8 @@ public partial class MainWindow : Window
             AnalysisOperation.CheckCancellation();
             using (ImportProgress.Stage(0, .1, "匹配芯片身份"))
                 data = RetestIdentityService.Prepare(data, config);
-            var rejudge = data.Items.All(i => i.Rule != null) && _rejudge != null ? _rejudge : new RejudgeSession(data, _rejudgeSettings);
+            var rejudge = ReferenceEquals(data, _rejudge?.Data) ? _rejudge! : new RejudgeSession(data, _rejudgeSettings);
+            if (_rejudge != null && ReferenceEquals(data, _data) && !ReferenceEquals(rejudge, _rejudge)) LimitExportService.ApplyPlan(rejudge, _rejudge.Rules.Values);
             CsvParseResult scope, analysis;
             using (ImportProgress.Stage(.1, .3, "筛选数据"))
                 scope = ReferenceEquals(data, _scopeSource) && cachedScope != null ? cachedScope : SampleFilterService.Apply(data, ranges, mode, match, config);

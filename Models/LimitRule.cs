@@ -49,9 +49,13 @@ public sealed class LimitRule : INotifyPropertyChanged
         if (low > high) throw new InvalidDataException($"{Name}：新 LSL 不能大于新 USL。");
         return (low, high);
     }
+    [JsonIgnore] public string WritableLimitsText
+    {
+        get { try { var limits = Limits(); return $"实际判定/写出：LSL {Format(limits.Low * DisplayFactor)}，USL {Format(limits.High * DisplayFactor)} {Unit}。" + (IsStdf ? "STDF R*4 精度；空白表示无该侧限值。" : "空白清除该侧限值。"); } catch (Exception ex) { return ex.Message; } }
+    }
     public void Reset() { NewLowText = Format(OriginalLow * DisplayFactor); NewHighText = Format(OriginalHigh * DisplayFactor); }
     public event PropertyChangedEventHandler? PropertyChanged;
-    private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
+    private void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); PropertyChanged?.Invoke(this, new(nameof(WritableLimitsText))); }
 }
 public sealed record BinPair(ushort SBin, ushort HBin);
 public sealed class RejudgeSettings
