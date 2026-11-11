@@ -33,7 +33,8 @@ public static partial class DatasetService
         bool coordinates = record.X.HasValue && record.Y.HasValue;
         string fallback = coordinates ? "" : !string.IsNullOrWhiteSpace(record.ChipSerialNumber)
             ? "SN:" + record.ChipSerialNumber.Trim() : "ROW:" + record.Id;
-        return (record.WaferId, coordinates ? record.X : null, coordinates ? record.Y : null, fallback);
+        string waferScope = record.Lot.Length == 0 ? record.WaferId : $"LOT:{record.Lot.Length}:{record.Lot}|WAFER:{record.WaferId}";
+        return (waferScope, coordinates ? record.X : null, coordinates ? record.Y : null, fallback);
     }
 
     // Export needs raw record selection only, without rebuilding every numeric column.
@@ -318,15 +319,10 @@ public static partial class DatasetService
             }
         string Key(TestItemData item)
         {
-            string key = (options.MatchByNumber ? item.TestNumber : item.Name).Trim();
-            if (key.Length == 0) throw new InvalidDataException("匹配依据存在空值，请改用另一种测试项匹配方式。");
-            // Qualified numbers may differ across files containing only a subset of names.
-            // Match the source number + actual name, rather than assigning B[1] to A[1].
-            if (options.MatchByNumber && ambiguousNumbers.Contains(BaseNumber(item)) ||
-                !options.MatchByNumber && duplicateNames.Contains(item.Name))
-                return $"D:{BaseNumber(item)}:{item.Name.Length}:{item.Name}:{item.StdfChannel.Length}:{item.StdfChannel}:{slots[item]}";
-            return options.MatchByNumber && long.TryParse(key, out long number) ? number.ToString(CultureInfo.InvariantCulture) : key;
+            // Do not conflate different source identities, names, MPR channels or original specifications.
+            return System.Text.Json.JsonSerializer.Serialize(new { item.SourceKey, Number = item.BaseTestNumber, item.Name, item.StdfChannel, item.LowLimit, item.HighLimit, item.Unit });
         }
+
         void CheckUnique(IEnumerable<TestItemData> items)
         {
             var duplicate = items.GroupBy(Key, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
@@ -387,6 +383,8 @@ public static partial class DatasetService
         foreach (var record in incoming.Records)
             records.Add(new CsvRecord
             {
+                SourcePath = record.SourcePath, SourceOffset = record.SourceOffset, Incomplete = record.Incomplete,
+                ExplicitTestFailures = record.ExplicitTestFailures?.Select(id => itemMap[id]).ToHashSet(),
                 WaferId = waferMap[record.WaferId], SerialNumber = record.SerialNumber, X = record.X, Y = record.Y,
                 OriginalSerialNumber = record.OriginalSerialNumber,
                 IsFtIdentity = record.IsFtIdentity, RetestUuid = record.RetestUuid, UuidTestNumbers = record.UuidTestNumbers,
@@ -398,6 +396,7 @@ public static partial class DatasetService
         return new CsvParseResult
         {
             Items = items, Records = records,
+            SourceHashes = existing.SourceHashes.Concat(incoming.SourceHashes).GroupBy(p => p.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Last().Value, StringComparer.OrdinalIgnoreCase),
             ImportWarning = StdfWarnings.Combine(existing.ImportWarning, incoming.ImportWarning),
             StdfWaferOrigins = StdfWaferMerge.Merge(existing, incoming, waferMap),
             SerialNumberNotice = string.Join("\n\n", new[] { existing.SerialNumberNotice, incoming.SerialNumberNotice }
@@ -410,6 +409,7 @@ public static partial class DatasetService
     {
         var merged = Build(definitions.Items, definitions.Records);
         merged.ImportWarning = definitions.ImportWarning;
+        merged.SourceHashes = definitions.SourceHashes;
         merged.StdfWaferOrigins = definitions.StdfWaferOrigins;
         MeasurementDisplay.Configure(merged.Items);
         string priorNotice = definitions.SerialNumberNotice;
@@ -450,6 +450,7 @@ public static partial class DatasetService
 
     internal static CsvRecord CloneRecord(CsvRecord record) => new()
     {
+        SourcePath = record.SourcePath, SourceOffset = record.SourceOffset, Incomplete = record.Incomplete, ExplicitTestFailures = record.ExplicitTestFailures,
         Id = record.Id, WaferId = record.WaferId, SerialNumber = record.SerialNumber,
         OriginalSerialNumber = record.OriginalSerialNumber,
         IsFtIdentity = record.IsFtIdentity, RetestUuid = record.RetestUuid, UuidTestNumbers = record.UuidTestNumbers,
@@ -519,6 +520,7 @@ public static partial class DatasetService
 
     internal static TestItemData CloneItem(TestItemData item) => new()
     {
+        SourcePath = item.SourcePath, SourceKey = item.SourceKey, StdfLimitGroup = item.StdfLimitGroup, StdfKind = item.StdfKind, Rule = item.Rule,
         Id = item.Id, Focus = item.Focus, ColumnIndex = item.ColumnIndex, Name = item.Name, DisplayName = item.DisplayName,
         TestNumber = item.TestNumber, Unit = item.Unit, SBin = item.SBin, HBin = item.HBin,
         StdfChannel = item.StdfChannel,

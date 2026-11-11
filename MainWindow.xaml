@@ -144,7 +144,7 @@
                             <Button x:Name="BinTableButton" Click="BtnBinStats_Click" Style="{StaticResource ToolbarAction}"><StackPanel Orientation="Horizontal"><controls:ActionIcon Kind="Table" Style="{StaticResource ButtonIcon}"/><TextBlock Text="BIN Table" VerticalAlignment="Center"/></StackPanel></Button>
                             <Button x:Name="WaferTableButton" Click="BtnWaferTable_Click" Style="{StaticResource ToolbarAction}"><StackPanel Orientation="Horizontal"><controls:ActionIcon Kind="Table" Style="{StaticResource ButtonIcon}"/><TextBlock Text="Wafer Table" VerticalAlignment="Center"/></StackPanel></Button>
                             <Button x:Name="StdfInformationButton" Click="BtnStdfInformation_Click" Style="{StaticResource ToolbarAction}" ToolTip="查看 STDF Lot Information，切换当前已打开或追加导入的 STDF 文件"><StackPanel Orientation="Horizontal"><controls:ActionIcon Kind="Info" Style="{StaticResource ButtonIcon}"/><TextBlock Text="Lot Info" VerticalAlignment="Center"/></StackPanel></Button>
-                            <Button x:Name="PredictionButton" Click="BtnYieldSimulation_Click" Style="{StaticResource ToolbarAction}"><StackPanel Orientation="Horizontal"><controls:ActionIcon Kind="Prediction" Style="{StaticResource ButtonIcon}"/><TextBlock Text="良率预测" VerticalAlignment="Center"/></StackPanel></Button>
+                            <Button Visibility="Collapsed" x:Name="PredictionButton" Click="BtnYieldSimulation_Click" Style="{StaticResource ToolbarAction}"><StackPanel Orientation="Horizontal"><controls:ActionIcon Kind="Prediction" Style="{StaticResource ButtonIcon}"/><TextBlock Text="良率预测" VerticalAlignment="Center"/></StackPanel></Button>
                         </StackPanel>
                     </StackPanel></Border>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -153,6 +153,19 @@
                     </StackPanel>
                 </WrapPanel>
             </DockPanel>
+        </Border>
+        <Border DockPanel.Dock="Top" Background="#EFF6FF" Padding="10,4">
+            <WrapPanel VerticalAlignment="Center">
+                <Button Content="导出重判文件…" Click="ExportRejudged" Padding="9,3" Margin="0,0,6,0"/>
+                <Button Content="保存规则" Click="SaveLimitPlan" Padding="6,3"/>
+                <Button Content="加载规则" Click="LoadLimitPlan" Padding="6,3"/>
+                <Button Content="恢复原限值" Click="ResetLimitRules" Padding="6,3"/>
+                <ComboBox x:Name="RuleCategoryFilter" SelectedIndex="0" SelectionChanged="RuleCategoryChanged" Width="95" Margin="6,0">
+                    <ComboBoxItem Content="全部分类"/><ComboBoxItem Content="有效项"/><ComboBoxItem Content="冲突项"/><ComboBoxItem Content="无效项"/>
+                </ComboBox>
+                <Button Content="开启可见项" Click="EnableVisibleRules" Padding="6,3"/>
+                <TextBlock x:Name="TxtRejudge" Text="打开文件以调整阈值" Margin="10,4" TextWrapping="Wrap"/>
+            </WrapPanel>
         </Border>
         <Border DockPanel.Dock="Bottom" Background="{StaticResource WorkspaceBackground}" Padding="14,5" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0">
             <Grid>
@@ -346,8 +359,8 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding DisplayName, Mode=OneTime}" SortMemberPath="DisplayName" Width="150">
-                            <DataGridTextColumn.Header>
+                        <DataGridTemplateColumn SortMemberPath="DisplayName" Width="150">
+                            <DataGridTemplateColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Test Item" Style="{StaticResource ColHeaderLabel}"/>
                                     <Grid Margin="0,3,0,0" ClipToBounds="True">
@@ -360,8 +373,15 @@
                                              PreviewMouseLeftButtonDown="HeaderFilter_PreviewMouseLeftButtonDown"/>
                                     </Grid>
                                 </StackPanel>
-                            </DataGridTextColumn.Header>
-                        </DataGridTextColumn>
+                            </DataGridTemplateColumn.Header>
+                        <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                                <StackPanel Orientation="Horizontal" ToolTip="{Binding Rule.Diagnosis}">
+                                    <CheckBox IsChecked="{Binding Rule.Participates, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="参与 DUT 重新分 BIN（独立于关注）" Margin="0,0,4,0"/>
+                                    <TextBlock Text="●" Foreground="{Binding Rule.CategoryColor}" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                         <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Site, Mode=OneTime}" SortMemberPath="SiteSort" Width="70">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
@@ -473,6 +493,15 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
+                        <DataGridTemplateColumn Header="新 LSL" Width="95" SortMemberPath="Rule.NewLowText">
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewLowText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="显示单位下的新下限；留空清除；可直接粘贴。STDF 使用实际 R*4 值。"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="新 USL" Width="95" SortMemberPath="Rule.NewHighText">
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewHighText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="显示单位下的新上限；留空清除；可直接粘贴。"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="良率变化" Width="100" SortMemberPath="YieldChange">
+                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding YieldChange}" ToolTip="{Binding YieldDetail}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                         <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Count, Mode=OneTime}" SortMemberPath="Count" Width="55">
                             <DataGridTextColumn.Header>
                                 <StackPanel>

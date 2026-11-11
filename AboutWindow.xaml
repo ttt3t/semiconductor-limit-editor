@@ -19,16 +19,16 @@
         </Border>
         <DockPanel Margin="0,0,0,14">
             <Border DockPanel.Dock="Right" Background="#EFF6FF" CornerRadius="5" Padding="9,4" VerticalAlignment="Center">
-                <TextBlock Text="V2.0.12" Foreground="#2563EB" FontWeight="SemiBold"/>
+                <TextBlock Text="V3.0.0" Foreground="#2563EB" FontWeight="SemiBold"/>
             </Border>
-            <TextBlock Text="CSV Analyzer" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+            <TextBlock Text="Limit Editor" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
         </DockPanel>
-        <TextBlock Text="半导体 CSV / STDF 测试数据分析工具" FontSize="14" Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,10"/>
+        <TextBlock Text="半导体阈值修改与 DUT 重新分 BIN 工具" FontSize="14" Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,10"/>
         <TextBlock FontSize="13" LineHeight="25" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}">
-            <Run Text="产品、批次与跨温综合良率管理"/><LineBreak/>
+            <Run Text="原始良品分类、参与规则与双 BIN 重判"/><LineBreak/>
             <Run Text="良率统计与多晶圆 / Site 对比"/><LineBreak/>
             <Run Text="晶圆 Map、直方图与散点图"/><LineBreak/>
-            <Run Text="阈值模拟、良率预测与 XLSX 报告导出"/>
+            <Run Text="STDF / CSV 原格式写出、规则与变更清单"/>
         </TextBlock>
         <Button x:Name="DetailedHelpButton" Content="详细说明" Style="{StaticResource PrimaryButton}" Click="DetailedHelp_Click"
                 HorizontalAlignment="Left" MinWidth="110" Margin="0,22,0,0"/>

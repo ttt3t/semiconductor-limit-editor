@@ -6,7 +6,7 @@ namespace SemiconductorCsvAnalyzer.Services;
 
 public static class AppSettings
 {
-    private static string _userDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SemiconductorCsvAnalyzer");
+    private static string _userDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SemiconductorLimitEditor");
     private static string _legacyDirectory = AppDomain.CurrentDomain.BaseDirectory;
     public static string SettingsPath =>
         Path.Combine(_userDirectory, "app.settings.ini");

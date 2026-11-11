@@ -15,7 +15,7 @@ public static class ReportExportFailure
         try
         {
             string directory = logDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SemiconductorCsvAnalyzer", "Logs");
+                "SemiconductorLimitEditor", "Logs");
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, $"report-failure-{DateTime.Now:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.log");
             var details = new StringBuilder(summary.ToString());

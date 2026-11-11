@@ -41,7 +41,7 @@ public sealed class LayoutSettings
 {
     public static LayoutSettings Current { get; } = new(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SemiconductorCsvAnalyzer", "layout.settings.json"));
+        "SemiconductorLimitEditor", "layout.settings.json"));
 
     private sealed class Document
     {

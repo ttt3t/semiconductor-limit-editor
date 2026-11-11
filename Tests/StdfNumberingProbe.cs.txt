@@ -72,11 +72,11 @@ static class Probe
             foreach (bool byNumber in new[] { false, true })
             {
                 var merged = DatasetService.LoadSources(new CsvImportSource[] { new(first), new(next, new(false, "", byNumber, false)) }, new());
-                Check(merged.Items.Count == 3 && merged.Items.Single(i => i.Name == "B").Values.Count == 2 && merged.Items.Select(i => i.TestNumber).Distinct().Count() == 3 && merged.Items.Single(i => i.Name == "C").TestNumber == "100[3]", "partial-schema files merge by actual test identity and renumber the union: " + byNumber);
+                Check(merged.Items.Count == 4 && merged.Items.Count(i => i.Name == "B") == 2 && merged.Items.All(i => i.Values.Count == 1) && merged.Items.Select(i => i.SourceKey).Distinct().Count() == 4, "partial-schema files preserve separate source rule identities and measurements: " + byNumber);
             }
             string repeatedA = Fixture(folder, "repeatedA.std", new[] { "A", "A" }), repeatedB = Fixture(folder, "repeatedB.std", new[] { "A", "A" });
             var repeats = DatasetService.LoadSources(new CsvImportSource[] { new(repeatedA), new(repeatedB, new(false, "", false, false)) }, new());
-            Check(repeats.Items.Count == 2 && repeats.Items.All(i => i.Values.Count == 2), "name-based batch merge distinguishes repeated names using their source number and execution slot");
+            Check(repeats.Items.Count == 4 && repeats.Items.All(i => i.Values.Count == 1) && repeats.Items.Select(i => i.SourceKey).Distinct().Count() == 4, "batch rules distinguish source context and repeated execution slots");
             Check(ColumnSearchRule.Compile("100[2]", true).Matches("100[2]", 100) && !ColumnSearchRule.Compile("100[2]", true).Matches("100[1]", 100) && ColumnSearchRule.Compile(">99", true).Matches("100[2]", 100) && ColumnSearchRule.Compile("10?", true).Matches("100[2]", 100), "qualified number search is literal while numeric comparisons and digit patterns use the base number");
             Console.WriteLine($"PASS {checks} STDF numbering checks"); return 0;
         }

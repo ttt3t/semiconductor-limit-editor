@@ -7,6 +7,7 @@ namespace SemiconductorCsvAnalyzer.Services;
 
 public sealed partial class CsvParseResult
 {
+    public IReadOnlyDictionary<string, string> SourceHashes { get; set; } = new Dictionary<string, string>();
     internal bool IsYieldProjection { get; set; }
     public string SourceDescription { get; set; } = "";
     public string ImportWarning { get; set; } = "";
@@ -146,6 +147,8 @@ public static class CsvParser
 
             items.Add(new TestItemData
             {
+                SourcePath = Path.GetFullPath(csvPath),
+                SourceKey = System.Text.Json.JsonSerializer.Serialize(new { Source = Path.GetFullPath(csvPath), Column = col, Name = name, Low = GetCell(lowRow, col), High = GetCell(highRow, col), Unit = GetCell(unitRow, col) }),
                 ColumnIndex = col,
                 Name = name,
                 DisplayName = displayName,
@@ -180,11 +183,12 @@ public static class CsvParser
             int skippedHeaders = 0;
             using var dataRows = CsvText.ReadRecords(dataReader, config.HasQuotedFields, cancellationToken).GetEnumerator();
             for (int r = 1; r < config.DataStartRow; r++) dataRows.MoveNext();
-            var replay = new Queue<string>();
+            var replay = new Queue<(long Row, string Text)>();
+            long sourceRow = config.DataStartRow - 1, currentRow = sourceRow;
             bool Next(out string line)
             {
-                if (replay.Count > 0) { line = replay.Dequeue(); return true; }
-                if (dataRows.MoveNext()) { line = dataRows.Current; return true; }
+                if (replay.Count > 0) { var entry = replay.Dequeue(); currentRow = entry.Row; line = entry.Text; return true; }
+                if (dataRows.MoveNext()) { currentRow = ++sourceRow; line = dataRows.Current; return true; }
                 line = ""; return false;
             }
             using (ImportProgress.Stage(0, .65, "读取 CSV 测量值"))
@@ -206,17 +210,17 @@ public static class CsvParser
                             // Only discard a complete matching definition block. Look-ahead is replayed
                             // on mismatch, so real values equal to an LSL/USL row are never swallowed.
                             int following = config.DataStartRow - headerRow - 1;
-                            var ahead = new List<string>();
+                            var ahead = new List<(long Row, string Text)>();
                             bool complete = following <= 256;
                             if (complete)
                                 for (int offset = 1; offset <= following; offset++)
                                 {
                                     if (!Next(out string next)) { complete = false; break; }
-                                    ahead.Add(next);
+                                    ahead.Add((currentRow, next));
                                     if (CsvText.Signature(ParseLine(next, config.Delimiter, config.HasQuotedFields)) != definitionSignatures[headerRow + offset - 1])
                                     { complete = false; break; }
                                 }
-                            if (!complete) replay = new Queue<string>(ahead.Concat(replay));
+                            if (!complete) replay = new Queue<(long Row, string Text)>(ahead.Concat(replay));
                             skippedHeaders += 1 + (complete ? ahead.Count : 0);
                             continue;
                         }
@@ -250,6 +254,7 @@ public static class CsvParser
 
                 var record = new CsvRecord
                 {
+                    SourcePath = Path.GetFullPath(csvPath), SourceOffset = currentRow,
                     WaferId = rowWafer,
                     SerialNumber = sn,
                     X = x,

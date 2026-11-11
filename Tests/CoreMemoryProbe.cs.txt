@@ -138,7 +138,7 @@ static class Probe
                 // measurement, then select its first/last/all-subsequent occurrences.
                 var expected = new Dictionary<string, HashSet<string>>();
                 foreach (var chip in records.GroupBy(r => ft
-                    ? (r.RetestUuid == "" ? "ROW:" + r.Id : r.Lot + ":" + r.RetestUuid) : "XY:" + r.X))
+                    ? (r.RetestUuid == "" ? "ROW:" + r.Id : r.Lot + ":" + r.RetestUuid) : "LOT:" + r.Lot + "|XY:" + r.X))
                 {
                     var history = chip.ToArray();
                     if (history.Length == 1 && mode != RetestMode.OnlyRetests)
@@ -227,7 +227,8 @@ static class Probe
             using (var gzip = new GZipStream(output, CompressionLevel.Fastest)) input.CopyTo(gzip);
             SameProjection(stdf + ".gz", sf, "compressed STDF " + big);
             var broken = P("truncated.stdf"); File.WriteAllBytes(broken, File.ReadAllBytes(stdf)[..^5]);
-            Reject<InvalidDataException>(() => DataFileService.ReadForYield(broken, cp, default), "truncated STDF rejected " + big);
+            var recovered = DataFileService.ReadForYield(broken, cp, default);
+            Check(recovered.ImportWarning.Length > 0 && recovered.Records.Count == 2, "truncated STDF preserves recovered records with warning " + big);
         }
         using var cts = new CancellationTokenSource(); cts.Cancel();
         Reject<OperationCanceledException>(() => DataFileService.ReadForYield(path, config, cts.Token), "yield read honors cancellation");

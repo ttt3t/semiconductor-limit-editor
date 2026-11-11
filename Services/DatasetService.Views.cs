@@ -35,6 +35,7 @@ public static partial class DatasetService
         return new CsvParseResult
         {
             Items = items, Records = records, Devices = BuildDevices(records),
+            SourceHashes = source.SourceHashes,
             SourceDescription = source.SourceDescription, StdfMetadata = source.StdfMetadata,
             ImportWarning = source.ImportWarning,
             StdfWaferOrigins = source.StdfWaferOrigins,

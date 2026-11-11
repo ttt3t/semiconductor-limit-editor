@@ -27,7 +27,7 @@ public sealed class RecentFilesService
     public RecentFilesService(string? path = null)
     {
         _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SemiconductorCsvAnalyzer", "recent-files.json");
+            "SemiconductorLimitEditor", "recent-files.json");
         try { _history = File.Exists(_path) ? JsonSerializer.Deserialize<History>(File.ReadAllText(_path)) ?? new() : new(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { _history = new(); }
         _history.Configs = Clean(_history.Configs); _history.Csvs = Clean(_history.Csvs);

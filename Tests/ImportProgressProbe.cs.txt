@@ -95,7 +95,7 @@ static class Probe
             using (var progress = new ImportProgress())
             {
                 var data = DatasetService.LoadSources(new[] { new CsvImportSource(csv), new CsvImportSource(stdf, options), new CsvImportSource(integrated, options) }, config);
-                Check(data.Records.Count == 22000 && data.Items.Count == 2 && progress.Latest.Fraction is >= .9 and < 1, "mixed batch covers all files and final merge without altering record count");
+                Check(data.Records.Count == 22000 && data.Items.Count == 3 && progress.Latest.Fraction is >= .9 and < 1, "mixed batch covers all files and final merge without altering record count");
             }
             using (var progress = new ImportProgress())
             {

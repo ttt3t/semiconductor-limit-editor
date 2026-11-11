@@ -22,7 +22,7 @@ public sealed class UiPreferencesService
     public UiPreferencesService(string? path = null)
     {
         _path = path ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SemiconductorCsvAnalyzer", "ui.preferences.json");
+            "SemiconductorLimitEditor", "ui.preferences.json");
         try
         {
             _value = File.Exists(_path)

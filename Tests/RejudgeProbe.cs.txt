@@ -1,0 +1,150 @@
+using System.Buffers.Binary;
+using System.Globalization;
+using System.IO.Compression;
+using System.Text;
+using SemiconductorCsvAnalyzer.Models;
+using SemiconductorCsvAnalyzer.Services;
+
+static class Probe
+{
+    static int checks; static string root = "";
+    static void Check(bool condition, string message) { if (!condition) throw new Exception(message); checks++; Console.WriteLine("PASS " + message); }
+    static void Reject<T>(Action action, string message) where T : Exception { try { action(); } catch (T) { Check(true, message); return; } throw new Exception(message); }
+    static TestItemData Item(string id) => new() { Id = id, SourceKey = id, Name = id, DisplayName = id, LowLimit = 0, HighLimit = 2 };
+    static CsvRecord Row(string id, int x, string s, string h, params (string Key, string Value)[] values) => new() { Id = id, SerialNumber = id, X = x, Y = 0, Site = "1", WaferId = "W", SBin = s, HBin = h, Measurements = values.ToDictionary(v => v.Key, v => v.Value) };
+    static AnalyzerConfig Config() => new() { DataStartRow = 6, TestItemStartColumn = 8, TestNumberRow = 5, SerialNumberColumn = 1, XColumn = 2, YColumn = 3, SiteColumn = 4, SBinColumn = 5, HBinColumn = 6, WaferColumn = 7, SkipRepeatedHeaders = true };
+    static void Rules()
+    {
+        var items = new List<TestItemData> { Item("valid"), Item("conflict"), Item("missing") };
+        var data = DatasetService.Build(items, new() { Row("good", 0, "1", "1", ("valid", "1"), ("conflict", "3")), Row("bad", 1, "2", "2", ("valid", "1"), ("conflict", "1"), ("missing", "1")) });
+        var settings = new RejudgeSettings { Pass = new(7, 8) }; var session = new RejudgeSession(data, settings);
+        Check(session.Rules["valid"].Category == RuleCategory.Effective && session.Rules["valid"].Participates, "bad samples all pass still classifies effective and enabled");
+        Check(session.Rules["conflict"].Category == RuleCategory.Conflict && !session.Rules["conflict"].Participates, "original good failure is a disabled conflict");
+        Check(session.Rules["missing"].Category == RuleCategory.Invalid && !session.Rules["missing"].Participates, "original good missing is disabled invalid");
+        var evaluated = session.Evaluate();
+        Check(evaluated[0].SBin == "1" && evaluated[0].HBin == "1" && !evaluated[0].Changed, "unaffected same-grade DUT preserves both original bins");
+        Check(evaluated[1].SBin == "7" && evaluated[1].HBin == "8" && evaluated[1].Changed, "recovered fail writes both configured target bins");
+        session.Rules["missing"].Participates = true;
+        Check(session.Evaluate()[0].Grade == RejudgeGrade.Pending, "manually enabled missing never becomes fake pass");
+        session.Rules["conflict"].Participates = true;
+        Check(session.Evaluate()[0].Grade == RejudgeGrade.Fail, "explicit failure wins over missing");
+        session.Rules["conflict"].NewHighText = "4";
+        Check(session.Rules["conflict"].Category == RuleCategory.Conflict && session.Rules["conflict"].Participates, "threshold edits freeze category and manual participation");
+        foreach (var r in session.Rules.Values) r.Participates = false;
+        Check(session.Evaluate().All(r => r.Grade == RejudgeGrade.Disabled && !r.Changed), "empty participation preserves bins instead of all-good");
+        var rule = session.Rules["valid"]; rule.IsStdf = true; rule.NewHighText = "1.234567890123";
+        Check(rule.Limits().High == (double)(float)1.234567890123, "preview uses writable STDF float precision");
+        rule.NewLowText = ""; Check(rule.Limits().Low == null, "blank explicitly clears one-sided bound");
+        rule.NewHighText = "NaN"; Reject<InvalidDataException>(() => rule.Limits(), "NaN rejected");
+        rule.NewHighText = "1e300"; Reject<InvalidDataException>(() => rule.Limits(), "R4 overflow rejected");
+        rule.NewHighText = "1"; rule.NewLowText = "2"; Reject<InvalidDataException>(() => rule.Limits(), "inverted bounds rejected");
+        var noGood = new RejudgeSession(DatasetService.Build(new() { Item("a") }, new() { Row("r", 0, "2", "2", ("a", "1")) }), new());
+        Check(noGood.Rules["a"].Participates && noGood.Rules["a"].ReferenceCount == 0, "no good reference retains effective default with unverified diagnosis");
+        var partial = new RejudgeSettings { OriginalPartialPass = new() { new(2, 1) } }; partial.Validate();
+        Check(partial.Original(Row("p", 0, "2", "1")) == RejudgeGrade.PartialPass, "same HBIN may have distinct paired grades");
+        partial.OriginalPartialPass.Add(new(1, 1)); Reject<InvalidDataException>(partial.Validate, "overlapping complete bin pairs rejected");
+        var retests = DatasetService.Build(new() { Item("t") }, new() { Row("old", 0, "1", "1", ("t", "1")), Row("last", 0, "2", "2") });
+        var rs = new RejudgeSession(retests, new()); var rr = rs.Evaluate();
+        Check(rr[1].Grade == RejudgeGrade.Pending, "last record never borrows earlier measurements");
+        Check(RejudgeSession.Select(retests, rr, RetestMode.Last, false).Single().RecordId == "last", "whole-record last selection");
+        Check(RejudgeSession.Select(retests, rr, RetestMode.Last, true).Single().RecordId == "old", "good priority is selected after new adjudication");
+        rs.Rules["t"].NewHighText = "0.5"; rr = rs.Evaluate();
+        Check(rr[0].Grade == RejudgeGrade.Fail && rr[1].Grade == RejudgeGrade.Pending, "incremental updates recompute affected rule without stitching");
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        Reject<OperationCanceledException>(() => rs.Evaluate(cts.Token), "canceled evaluation does not publish partial counters");
+        Check(rs.Evaluate().SequenceEqual(rr), "evaluation cache remains consistent after cancellation");
+    }
+    static void Csv()
+    {
+        string path = Path.Combine(root, "input.csv");
+        string header = "SN,X,Y,Site,SBIN,HBIN,Wafer,Voltage\r\nLSL,,,,,,,0\r\nUSL,,,,,,,2\r\nUNIT,,,,,,,V\r\nNUM,,,,,,,101\r\n";
+        string original = header + "A,0,0,1,1,1,W,\"1.000000\"\r\n" + header + "B,1,0,1,2,2,W,\"3.000000\"\r\n";
+        File.WriteAllText(path, original, new UTF8Encoding(true));
+        var c = Config(); var data = DataFileService.Parse(path, c); using var lease = new DatasetLease(data.Records);
+        Check(data.Records.Count == 2 && data.Records[1].SourceOffset == 12, "CSV source locators survive repeated multiline header blocks");
+        var s = new RejudgeSession(data, new() { Pass = new(7, 8) }); s.Rules.Values.Single().NewHighText = "4";
+        string dest = Path.Combine(root, "csv-export");
+        LimitExportService.ExportBundle(dest, new[] { new CsvImportSource(path) }, c, s, s.Fingerprints);
+        string output = Path.Combine(dest, "001_input.csv"); var text = File.ReadAllText(output);
+        Check(text.Contains("A,0,0,1,1,1,W,\"1.000000\"\r\n") && text.Contains("B,1,0,1,7,8,W,\"3.000000\"\r\n"), "CSV retains measured raw tokens, quoting, CRLF and unaffected bins");
+        Check(File.ReadAllBytes(output).Take(3).SequenceEqual(new byte[] { 239, 187, 191 }), "CSV preserves UTF8 BOM");
+        Check(File.ReadAllText(path) == original, "input file never overwritten");
+        Check(File.Exists(Path.Combine(dest, "rules.json")) && File.Exists(output + ".changes.json"), "bundle contains portable rules and per-record change manifest");
+        Reject<IOException>(() => LimitExportService.ExportBundle(dest, new[] { new CsvImportSource(path) }, c, s, s.Fingerprints), "existing output destination rejected");
+        File.AppendAllText(path, "\r\n");
+        string changed = Path.Combine(root, "changed"); Reject<IOException>(() => LimitExportService.ExportBundle(changed, new[] { new CsvImportSource(path) }, c, s, s.Fingerprints), "source fingerprint changes prevent stale export");
+        Check(!Directory.Exists(changed), "failed bundle leaves no published partial output");
+    }
+    static string Fixture(bool big, bool gzip)
+    {
+        string path = Path.Combine(root, $"{big}-{gzip}.stdf" + (gzip ? ".gz" : ""));
+        using var raw = File.Create(path); using Stream stream = gzip ? new GZipStream(raw, CompressionLevel.Fastest, true) : new BufferedStream(raw);
+        using var writer = new BinaryWriter(stream);
+        void U2(BinaryWriter w, ushort v) { var b = new byte[2]; if (big) BinaryPrimitives.WriteUInt16BigEndian(b, v); else BinaryPrimitives.WriteUInt16LittleEndian(b, v); w.Write(b); }
+        void U4(BinaryWriter w, uint v) { var b = new byte[4]; if (big) BinaryPrimitives.WriteUInt32BigEndian(b, v); else BinaryPrimitives.WriteUInt32LittleEndian(b, v); w.Write(b); }
+        void F(BinaryWriter w, float v) => U4(w, BitConverter.SingleToUInt32Bits(v));
+        void C(BinaryWriter w, string s) { var b = Encoding.Latin1.GetBytes(s); w.Write((byte)b.Length); w.Write(b); }
+        void R(byte type, byte sub, Action<BinaryWriter> action) { using var b = new MemoryStream(); using var w = new BinaryWriter(b); action(w); U2(writer, (ushort)b.Length); writer.Write(type); writer.Write(sub); writer.Write(b.ToArray()); }
+        R(0, 10, w => { w.Write((byte)(big ? 1 : 2)); w.Write((byte)4); });
+        R(1, 10, w => { w.Write(new byte[15]); foreach (var s in new[] { "L", "P", "", "", "JOB", "REV" }) C(w, s); });
+        R(1, 80, w => w.Write(new byte[] { 1, 1, 2, 1, 2 }));
+        R(2, 10, w => { w.Write(new byte[] { 1, 1 }); U4(w, 1); C(w, "W"); });
+        for (int n = 0; n < 3; n++)
+        {
+            byte site = (byte)(n == 1 ? 2 : 1);
+            R(5, 10, w => w.Write(new byte[] { 1, site }));
+            R(15, 10, w =>
+            {
+                U4(w, 101); w.Write(new byte[] { 1, site, (byte)(n == 1 ? 128 : 0), 192 }); F(w, n == 1 ? 3 : n == 2 ? 2 : 1); C(w, "Voltage"); C(w, "");
+                if (n == 0) { w.Write(new byte[4]); F(w, 0); F(w, 2); C(w, "V"); }
+            });
+            R(15, 15, w => { U4(w, 201); w.Write(new byte[] { 1, site, 0, 192 }); U2(w, 0); U2(w, 2); F(w, 1); F(w, 1.5f); C(w, "MPR"); C(w, ""); w.Write(new byte[4]); F(w, 0); F(w, 2); });
+            R(180, 99, w => w.Write(new byte[] { 0, 255, 17, 33, (byte)n }));
+            R(5, 20, w => { w.Write(new byte[] { 1, site, (byte)(n == 1 ? 8 : 0) }); U2(w, 3); U2(w, (ushort)(n + 1)); U2(w, (ushort)(n + 1)); U2(w, (ushort)n); U2(w, 0); U4(w, 1); C(w, "D" + n); });
+        }
+        R(2, 20, w => { w.Write(new byte[] { 1, 1 }); U4(w, 2); U4(w, 3); U4(w, 0); U4(w, 0); U4(w, 2); U4(w, 0); C(w, "W"); });
+        R(1, 30, w => { w.Write(new byte[] { 255, 0 }); U4(w, 3); U4(w, 0); U4(w, 0); U4(w, 2); U4(w, 0); });
+        foreach (byte sub in new byte[] { 40, 50 }) for (ushort bin = 1; bin <= 3; bin++) R(1, sub, w => { w.Write(new byte[] { 255, 0 }); U2(w, bin); U4(w, 1); w.Write((byte)(bin == 2 ? 'F' : 'P')); C(w, "BIN" + bin); });
+        R(10, 30, w => { w.Write(new byte[] { 255, 0, (byte)'P' }); U4(w, 101); U4(w, 3); U4(w, 1); U4(w, 0); C(w, "Voltage"); });
+        R(1, 20, w => { U4(w, 2); w.Write((byte)' '); });
+        return path;
+    }
+    static List<(byte Type, byte Sub, byte[] Payload)> Read(string path)
+    {
+        using var file = SourceFileReader.Open(path); using var reader = new StdfReader(file); var rows = new List<(byte, byte, byte[])>();
+        while (reader.Next()) rows.Add((reader.Type, reader.Subtype, reader.Payload)); return rows;
+    }
+    static void Native(bool big, bool gzip)
+    {
+        string path = Fixture(big, gzip); var c = Config(); var data = DataFileService.Parse(path, c); using var lease = new DatasetLease(data.Records);
+        Check(data.ImportWarning.Length == 0, "native fixture complete " + big + "/" + gzip + " " + data.ImportWarning);
+        var s = new RejudgeSession(data, new() { Pass = new(7, 8) });
+        var ptr = data.Items.Single(i => i.BaseTestNumber == "101"); s.Rules[ptr.Id].NewHighText = "4";
+        var mpr = s.Rules.Values.Where(r => r.SharedGroup.Length > 0).ToArray();
+        Check(mpr.Length == 2 && mpr[0].SharedGroup == mpr[1].SharedGroup, "MPR channels expose shared rule group");
+        var results = s.Evaluate();
+        Check(results[1].Changed && results[1].SBin == "7" && results[1].HBin == "8" && !results[0].Changed && !results[2].Changed, "native whole-record rebin changes only recovered DUT");
+        string outDir = Path.Combine(root, "native-" + big + "-" + gzip);
+        LimitExportService.ExportBundle(outDir, new[] { new CsvImportSource(path) }, c, s, s.Fingerprints);
+        string output = Path.Combine(outDir, "001_" + Path.GetFileName(path)); var reread = DataFileService.Parse(output, c); using var lease2 = new DatasetLease(reread.Records);
+        Check(reread.ImportWarning.Length == 0 && reread.Records[1].SBin == "7" && reread.Records[1].HBin == "8", "export reimports with coherent dual bins and no warnings");
+        Check(reread.Items.Single(i => i.BaseTestNumber == "101").HighLimit == 4 && reread.Records.Count == 3, "PTR inherited limits updated without losing history");
+        Check(data.Items.Select(i => i.Values.Select(v => v.Value).ToArray()).Zip(reread.Items).All(p => p.First.SequenceEqual(p.Second.Values.Select(v => v.Value))), "native measurement values unchanged");
+        var before = Read(path); var after = Read(output);
+        Check(before.Where(r => r.Type == 180).Zip(after.Where(r => r.Type == 180)).All(p => p.First.Payload.SequenceEqual(p.Second.Payload)), "unknown records preserved byte-for-byte in order");
+        var oldPrr = before.Where(r => r.Type == 5 && r.Sub == 20).ToArray(); var newPrr = after.Where(r => r.Type == 5 && r.Sub == 20).ToArray();
+        Check(oldPrr[0].Payload.SequenceEqual(newPrr[0].Payload) && oldPrr[2].Payload.SequenceEqual(newPrr[2].Payload), "unaffected PRRs byte-for-byte intact");
+        uint U(byte[] p, int i) => big ? BinaryPrimitives.ReadUInt32BigEndian(p.AsSpan(i)) : BinaryPrimitives.ReadUInt32LittleEndian(p.AsSpan(i));
+        Check(U(after.Single(r => r.Type == 1 && r.Sub == 30).Payload, 14) == 3, "PCR good count synchronized");
+        Check(U(after.Single(r => r.Type == 2 && r.Sub == 20).Payload, 18) == 3, "WRR good count synchronized across sites");
+        Check(U(after.Single(r => r.Type == 10 && r.Sub == 30).Payload, 11) == 0, "TSR real test failure count synchronized");
+        Check(after.Count(r => r.Type == 1 && r.Sub is 40 or 50) == 8, "new HBR and SBR bin definitions emitted");
+        mpr[0].NewHighText = "4";
+        Reject<InvalidDataException>(() => LimitExportService.ApplyPlan(s, s.Rules.Values.ToArray()), "independent MPR channel limit changes rejected");
+    }
+    static int Main(string[] args)
+    {
+        try { root = Path.GetFullPath(args[0]); if (Directory.Exists(root)) Directory.Delete(root, true); Directory.CreateDirectory(root); Rules(); Csv(); foreach (bool big in new[] { false, true }) foreach (bool gzip in new[] { false, true }) Native(big, gzip); Console.WriteLine($"ALL {checks} REJUDGE CHECKS PASSED"); return 0; }
+        catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+}

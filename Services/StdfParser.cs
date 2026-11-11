@@ -18,7 +18,8 @@ public static class StdfParser
         => ParseCore(path, config, progress, cancellationToken, mode, false);
 
     internal static CsvParseResult ParseCore(string path, AnalyzerConfig config, Action<string>? progress,
-        CancellationToken cancellationToken, StdfImportMode mode, bool yieldOnly)
+        CancellationToken cancellationToken, StdfImportMode mode, bool yieldOnly,
+        Action<long, byte, byte, byte[], IReadOnlyList<TestItemData>>? observer = null)
     {
         if (!cancellationToken.CanBeCanceled) cancellationToken = AnalysisOperation.Token;
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
@@ -27,7 +28,7 @@ public static class StdfParser
         string name = Path.GetFileName(path);
         if (name.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)) name = name[..^3];
         name = Path.GetFileNameWithoutExtension(name);
-        var catalog = new Catalog(mode);
+        var catalog = new Catalog(mode) { SourcePath = Path.GetFullPath(path) };
         progress?.Invoke("正在读取 STDF 测试定义…");
         using (ImportProgress.Stage(0, .3, "扫描 STDF 测试定义"))
             new Pass(catalog, config, name, null, cancellationToken).Read(file);
@@ -40,7 +41,7 @@ public static class StdfParser
         var store = yieldOnly ? null : new RawMeasurementStore();
         try
         {
-            var pass = new Pass(catalog, config, name, store, cancellationToken, projection);
+            var pass = new Pass(catalog, config, name, store, cancellationToken, projection, observer);
             using (ImportProgress.Stage(.3, .8, "读取 STDF 芯片与测量值"))
                 pass.Read(file);
             stamp.Validate(file);
@@ -109,6 +110,7 @@ public static class StdfParser
     {
         public Catalog(StdfImportMode mode) { Mode = mode; Metadata = new(Warnings); }
         public StdfImportMode Mode { get; }
+        public string SourcePath { get; set; } = "";
         public readonly List<TestItemData> Items = new();
         public readonly Dictionary<FamilyKey, Family> Families = new();
         public readonly Dictionary<TestKey, string> TestNames = new();
@@ -198,6 +200,10 @@ public static class StdfParser
             {
                 if (!discovering) throw new InvalidDataException("STDF 两次读取的测试阈值不一致。");
                 item = new TestItemData { ColumnIndex = Items.Count, TestNumber = key.Test.Number.ToString(CultureInfo.InvariantCulture), StdfChannel = key.Channel,
+                    SourcePath = SourcePath,
+                    SourceKey = System.Text.Json.JsonSerializer.Serialize(new { SourcePath, Kind = key.Test.Kind, key.Test.Number, key.Test.Head, key.Test.Site, key.Channel, key.Occurrence, key.Name, limits.Lower, limits.Upper, limits.Unit }),
+                    StdfLimitGroup = key.Test.Kind == 15 ? System.Text.Json.JsonSerializer.Serialize(new { SourcePath, key.Test.Kind, key.Test.Number, key.Test.Head, key.Test.Site, key.Occurrence, key.Name, limits }) : "",
+                    StdfKind = key.Test.Kind,
                     Unit = limits.Unit, LowLimit = limits.Lower, HighLimit = limits.Upper, IsStdfMeasurement = true };
                 family.Variants.Add(limits, item); Items.Add(item);
             }
@@ -269,6 +275,7 @@ public static class StdfParser
         public WaferScope Wafer = null!;
         public string Product = "", Program = "", Lot = "";
         public bool HasTests;
+        public HashSet<string>? Failures;
         public readonly Dictionary<(TestKey Test, string Name), int> Occurrences = new();
         public readonly byte[] States;
         public readonly double[] Numbers;
@@ -283,7 +290,7 @@ public static class StdfParser
 
         public void Reset()
         {
-            HasTests = false;
+            HasTests = false; Failures?.Clear();
             Occurrences.Clear();
             if (States.Length > 0) Array.Clear(States, 0, States.Length);
             InvalidTexts?.Clear();
@@ -307,17 +314,22 @@ public static class StdfParser
         private readonly Dictionary<(byte Head, byte Group), WaferScope> _wafers = new();
         private string _product = "", _program = "", _lot = "";
         private long _order;
+        private long _recordOffset;
+        private string _sourcePath = "";
+        private byte? _partFlags;
+        private readonly Action<long, byte, byte, byte[], IReadOnlyList<TestItemData>>? _observer;
+        private readonly List<TestItemData> _recordItems = new();
         private int _waferIndex;
         private bool _mir, _mrr;
         private bool Discovering => _store == null && _projection == null;
         public readonly List<(long Order, CsvRecord Record)> Records = new();
 
         public Pass(Catalog catalog, AnalyzerConfig config, string fileName, RawMeasurementStore? store, CancellationToken token,
-            YieldReadProjection? projection = null)
+            YieldReadProjection? projection = null, Action<long, byte, byte, byte[], IReadOnlyList<TestItemData>>? observer = null)
         {
             _catalog = catalog; _config = config; _fileName = fileName; _store = store; _token = token;
             _product = config.Product; _program = config.Program; _lot = config.Lot;
-            _projection = projection;
+            _projection = projection; _observer = observer;
             if (store != null) _schema = new MeasurementSchema(catalog.Items.Select(i => i.Id));
         }
 
@@ -340,6 +352,7 @@ public static class StdfParser
 
         public void Read(FileStream file)
         {
+            _sourcePath = Path.GetFullPath(file.Name);
             using var reader = new StdfReader(file, Discovering ? _catalog.Warnings : null);
             int progressRecords = 0;
             while (reader.Next())
@@ -347,6 +360,7 @@ public static class StdfParser
                 _token.ThrowIfCancellationRequested();
                 // For gzip, use compressed bytes consumed; no decompression or extra scan for progress.
                 if ((++progressRecords & 4095) == 0) ImportProgress.Report((double)file.Position / Math.Max(1, file.Length));
+                _recordOffset = reader.RecordStart; _recordItems.Clear(); _partFlags = null;
                 var fields = reader.Fields;
                 try
                 {
@@ -381,6 +395,7 @@ public static class StdfParser
                     if (Discovering) _catalog.Warnings.Add(key, message);
                     else _catalog.Warnings.AddOnce(key, message);
                 }
+                if (!Discovering && _observer != null) _observer(_recordOffset, reader.Type, reader.Subtype, reader.Payload, _recordItems);
             }
             foreach (var entry in _parts.ToArray())
             {
@@ -512,7 +527,7 @@ public static class StdfParser
             ushort? hbin = null, sbin = null; short? x = null, y = null; string sn = "";
             try
             {
-                f.OptionalU1(); f.OptionalU2(); hbin = f.OptionalU2();
+                _partFlags = f.OptionalU1(); f.OptionalU2(); hbin = f.OptionalU2();
                 sbin = f.OptionalU2(); x = f.OptionalI2(); y = f.OptionalI2(); f.OptionalU4();
                 sn = (f.OptionalCn() ?? "").Trim(); f.OptionalSkipCn(); f.OptionalBytes();
             }
@@ -547,6 +562,9 @@ public static class StdfParser
                         part.States[item.ColumnIndex] = RawMeasurementStore.StateNotApplicable;
             var record = new CsvRecord
             {
+                SourcePath = _sourcePath, SourceOffset = hbin.HasValue ? _recordOffset : -1,
+                Incomplete = !hbin.HasValue || !sbin.HasValue || _partFlags == null || (_partFlags.Value & 0x14) != 0,
+                ExplicitTestFailures = part.Failures?.ToHashSet(),
                 WaferId = part.Wafer.Name, SerialNumber = sn, Site = _catalog.Heads.Count > 1 ? $"{head}:{site}" : site.ToString(CultureInfo.InvariantCulture),
                 X = x is null or short.MinValue ? null : x, Y = y is null or short.MinValue ? null : y,
                 HBin = hbin is null or ushort.MaxValue ? "" : hbin.Value.ToString(CultureInfo.InvariantCulture), SBin = sbin is null or ushort.MaxValue ? "" : sbin.Value.ToString(CultureInfo.InvariantCulture),
@@ -649,6 +667,8 @@ public static class StdfParser
             var item = _catalog.Item(family, limits, description, Discovering, out bool hasMultipleVariants);
             part.HasTests = true;
             if (Discovering) return;
+            _recordItems.Add(item);
+            if ((flags & 0x80) != 0 && (flags & 0x50) == 0) (part.Failures ??= new()).Add(item.Id);
             int col = item.ColumnIndex;
             if (part.States[col] != RawMeasurementStore.StateAbsent)
                 throw new ArgumentException("同一芯片内测试项列索引重复。");
@@ -656,7 +676,7 @@ public static class StdfParser
             {
                 part.States[col] = RawMeasurementStore.StateEmpty; // Explicitly untested; never insert zero.
             }
-            else if ((flags & (functional ? 0x6d : 0x2f)) != 0 || (parm & 7) != 0 || value == null || !float.IsFinite(value.Value))
+            else if ((flags & (functional ? 0x6d : 0x6f)) != 0 || (parm & 7) != 0 || value == null || !float.IsFinite(value.Value))
             {
                 part.States[col] = RawMeasurementStore.StateText;
                 (part.InvalidTexts ??= new())[col] =

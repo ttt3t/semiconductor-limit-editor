@@ -89,6 +89,7 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         InitializeColumnSearch();
+        InitializeRejudge();
         ApplyUiPreferences();
         _uiPreferences.Changed += OnUiPreferencesChanged;
         _memoryReclaimer = new IdleMemoryReclaimer(Dispatcher, () => CanReclaimMemory);
@@ -237,7 +238,8 @@ public partial class MainWindow : Window
     private void BtnSettings_Click(object sender, RoutedEventArgs e)
     {
         if (_isBusy) return;
-        new SettingsWindow(_config, ApplySettings, OpenCsvAsync, _recentFiles, _uiPreferences, _data, CancelOperation, _currentCsvPath) { Owner = this }.ShowDialog();
+        var settings = new SettingsWindow(_config, ApplySettings, OpenCsvAsync, _recentFiles, _uiPreferences, _data, CancelOperation, _currentCsvPath) { Owner = this };
+        AddRejudgeSettings(settings); settings.ShowDialog();
     }
 
     private async Task ApplySettings(AnalyzerConfig config)
@@ -267,7 +269,7 @@ public partial class MainWindow : Window
     private void UpdateWindowTitle()
     {
         string configName = string.IsNullOrWhiteSpace(_config.ConfigFileName) ? "未加载配置" : _config.ConfigFileName;
-        Title = $"CSV Analyzer · V2.0.12 | 当前数据：{_currentDataName} | 配置：{configName}";
+        Title = $"Semiconductor Limit Editor · V3.0.0 | 当前数据：{_currentDataName} | 配置：{configName}";
     }
 
     private void UpdateConfigInfo()
@@ -553,7 +555,7 @@ public partial class MainWindow : Window
     }
 
     private sealed record PreparedAnalysis(CsvParseResult Data, List<string> Sites, List<TestItemSummary> Summaries,
-        CsvParseResult Source, CsvParseResult Scope, IReadOnlyList<SampleRange> Ranges, SampleMatchMode Match);
+        CsvParseResult Source, CsvParseResult Scope, IReadOnlyList<SampleRange> Ranges, SampleMatchMode Match, RejudgeSession Rejudge);
 
     private Task<PreparedAnalysis> PrepareAnalysisAsync(CsvParseResult data, AnalyzerConfig config)
     {
@@ -570,6 +572,7 @@ public partial class MainWindow : Window
             AnalysisOperation.CheckCancellation();
             using (ImportProgress.Stage(0, .1, "匹配芯片身份"))
                 data = RetestIdentityService.Prepare(data, config);
+            var rejudge = data.Items.All(i => i.Rule != null) && _rejudge != null ? _rejudge : new RejudgeSession(data, _rejudgeSettings);
             CsvParseResult scope, analysis;
             using (ImportProgress.Stage(.1, .3, "筛选数据"))
                 scope = ReferenceEquals(data, _scopeSource) && cachedScope != null ? cachedScope : SampleFilterService.Apply(data, ranges, mode, match, config);
@@ -580,7 +583,7 @@ public partial class MainWindow : Window
                 var sites = CollectSites(scope.Items, scope.Records);
                 var summaries = SummaryService.Build(analysis.Items, sites, scope.Wafers, combine, combineWafers, config);
                 ImportProgress.Report(1, true);
-                return new PreparedAnalysis(analysis, sites, summaries, data, scope, ranges, match);
+                return new PreparedAnalysis(analysis, sites, summaries, data, scope, ranges, match, rejudge);
             }
         });
     }
@@ -617,6 +620,7 @@ public partial class MainWindow : Window
         _devices = prepared.Scope.Devices;
         _allSites = prepared.Sites;
         _summaries = prepared.Summaries;
+        AttachRejudge(prepared.Rejudge);
         InitializeRun(changedData);
         ApplySearchFilter(keepName, keepSite, keepWafer);
         UpdateBottomInfo();
@@ -771,6 +775,7 @@ public partial class MainWindow : Window
 
     private bool MatchesColumnFilters(TestItemSummary s)
     {
+        if (RuleCategoryFilter.SelectedIndex > 0 && s.Rule?.Category != (RuleCategory)(RuleCategoryFilter.SelectedIndex - 1)) return false;
         foreach (var kv in _columnValueFilters)
             if (!kv.Value.Contains(ColumnText(s, kv.Key))) return false;
         foreach (var kv in _columnFilters)
@@ -1126,7 +1131,7 @@ public partial class MainWindow : Window
         if (e.OriginalSource is DependencyObject source)
         {
             for (var node = source; node != null; node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
-                if (node is CheckBox) return;
+                if (node is CheckBox or TextBox) return;
         }
         DependencyObject? dep = e.OriginalSource as DependencyObject;
         while (dep != null && dep is not DataGridCell)

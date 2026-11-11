@@ -35,13 +35,14 @@
                     <ComboBox x:Name="CmbTargetWafer" Margin="0,10,0,0" IsEnabled="{Binding IsChecked, ElementName=SameWafer}"/>
                 </StackPanel>
             </GroupBox>
-            <GroupBox Header="2. 测试项匹配方式" Margin="0,0,0,12">
+            <TextBlock Text="各导入来源的原始规格、分类基准与规则独立保留；不会用后续文件阈值覆盖已有规则。" TextWrapping="Wrap" Foreground="#475569" Margin="0,0,0,12"/>
+            <GroupBox Visibility="Collapsed" Header="2. 测试项匹配方式" Margin="0,0,0,12">
                 <StackPanel Orientation="Horizontal" Margin="10">
                     <RadioButton x:Name="MatchNumber" GroupName="Match" Content="按序号" Margin="0,0,32,0"/>
                     <RadioButton x:Name="MatchName" GroupName="Match" Content="按测试项名称" IsChecked="True"/>
                 </StackPanel>
             </GroupBox>
-            <GroupBox Header="3. 已匹配测试项的阈值" Margin="0,0,0,12">
+            <GroupBox Visibility="Collapsed" Header="3. 已匹配测试项的阈值" Margin="0,0,0,12">
                 <StackPanel Orientation="Horizontal" Margin="10">
                     <RadioButton x:Name="OldLimits" GroupName="Limits" Content="使用旧文件阈值" IsChecked="True" Margin="0,0,24,0"/>
                     <RadioButton x:Name="NewLimits" GroupName="Limits" Content="使用新文件阈值"/>

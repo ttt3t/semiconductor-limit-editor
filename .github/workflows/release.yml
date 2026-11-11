@@ -1,0 +1,68 @@
+name: Build and release Limit Editor
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Portable adjudication and data regressions
+        shell: bash
+        run: |
+          bash Tests/run-rejudge.sh
+          bash Tests/run-core-memory.sh
+          bash Tests/run-good-retest.sh
+          bash Tests/run-import-progress.sh
+          bash Tests/run-stdf-numbering.sh
+          bash Tests/run-scatter-raster.sh
+          bash Tests/run-column-search.sh
+          bash Tests/run-map-table-copy.sh
+      - name: Publish framework-dependent Windows x64 executable
+        shell: pwsh
+        run: |
+          dotnet publish SemiconductorCsvAnalyzer.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/win-x64-framework-dependent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Real WPF import, editing and preview smoke test
+        shell: pwsh
+        run: |
+          $log = Join-Path $PWD 'artifacts/wpf-smoke.log'
+          $exe = Join-Path $PWD 'artifacts/win-x64-framework-dependent/SemiconductorLimitEditor.exe'
+          $process = Start-Process $exe -ArgumentList '--smoke-test', ('"' + $log + '"') -PassThru
+          if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'WPF smoke test timed out' }
+          if (Test-Path $log) { Get-Content $log }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $log) -or -not (Select-String -Path $log -SimpleMatch 'ALL WPF REJUDGE SMOKE CHECKS PASSED')) { throw 'WPF smoke test failed' }
+      - name: Package executable, configuration and documentation
+        shell: pwsh
+        run: |
+          Copy-Item Docs/ReleaseNotes-3.0.0.md artifacts/win-x64-framework-dependent/README.md
+          Copy-Item LICENSE artifacts/win-x64-framework-dependent/LICENSE
+          Compress-Archive -Path artifacts/win-x64-framework-dependent/* -DestinationPath artifacts/SemiconductorLimitEditor-3.0.0-win-x64-framework-dependent.zip
+          $asset = 'artifacts/SemiconductorLimitEditor-3.0.0-win-x64-framework-dependent.zip'
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  SemiconductorLimitEditor-3.0.0-win-x64-framework-dependent.zip" | Out-File artifacts/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: limit-editor-windows-build
+          path: |
+            artifacts/*.zip
+            artifacts/*.txt
+            artifacts/*.log
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release create $env:GITHUB_REF_NAME artifacts/SemiconductorLimitEditor-3.0.0-win-x64-framework-dependent.zip artifacts/SHA256SUMS.txt --verify-tag --title 'Semiconductor Limit Editor 3.0.0' --notes-file Docs/ReleaseNotes-3.0.0.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

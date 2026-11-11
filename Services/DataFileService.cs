@@ -36,18 +36,26 @@ public static class DataFileService
         using var fileProgress = ImportProgress.Stage(0, 1, Path.GetFileName(path));
         if (!cancellationToken.CanBeCanceled) cancellationToken = AnalysisOperation.Token;
         cancellationToken.ThrowIfCancellationRequested();
+        string sourceHash = LimitExportService.Fingerprint(path);
         bool stdf = IsStdf(path);
         bool integrated = !stdf && IntegratedCsvService.IsIntegrated(path);
         CsvParseResult result;
         using (ImportProgress.Stage(0, .96, ""))
             result = stdf ? StdfParser.ParseCore(path, config, progress, cancellationToken, stdfMode, yieldOnly)
                 : CsvParser.ParseCore(path, config, progress, cancellationToken, yieldOnly);
+        if (integrated)
+        {
+            for (int i = 0; i < result.Items.Count; i++) { result.Items[i].SourcePath = Path.GetFullPath(path); result.Items[i].SourceKey = Path.GetFullPath(path) + ":Integrated:" + i; }
+            for (int i = 0; i < result.Records.Count; i++) { result.Records[i].SourcePath = Path.GetFullPath(path); result.Records[i].SourceOffset = i; }
+        }
         using (ImportProgress.Stage(.96, 1, "匹配芯片身份"))
         {
             if (SerialNumberService.Normalize(result, !stdf && !integrated && config.SerialNumberColumn <= 0))
                 result.SerialNumberNotice = $"文件“{Path.GetFileName(path)}”：{result.SerialNumberNotice}";
             result = yieldOnly ? YieldReadProjection.PrepareIdentity(result, config) : RetestIdentityService.Prepare(result, config);
             ImportProgress.Report(1, true);
+            if (LimitExportService.Fingerprint(path) != sourceHash) throw new IOException("导入期间源文件发生变化，请重新打开。");
+            result.SourceHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [Path.GetFullPath(path)] = sourceHash };
             return result;
         }
     }

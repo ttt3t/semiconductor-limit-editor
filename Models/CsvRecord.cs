@@ -3,6 +3,10 @@ namespace SemiconductorCsvAnalyzer.Models;
 // Raw measurements retain blanks and invalid text without entering numeric statistics.
 public sealed class CsvRecord
 {
+    public string SourcePath { get; set; } = "";
+    public long SourceOffset { get; set; } = -1;
+    public bool Incomplete { get; set; }
+    public HashSet<string>? ExplicitTestFailures { get; set; }
     public string Product { get; set; } = "";
     public string Program { get; set; } = "";
     public string Lot { get; set; } = "";

@@ -5,7 +5,7 @@ using SemiconductorCsvAnalyzer.Models;
 namespace SemiconductorCsvAnalyzer.Services;
 
 public enum ManagementChartMode { YieldBars, StackedCounts, Pareto, RadialLines, CenterEdge, HorizontalBars, StackedPercentages }
-public enum ManagementCountDisplay { Count, PercentOfTotal, PercentOfFailures }
+
 public sealed record ManagementTrendData(string[] Labels, List<WaferCategorySeries> Series,
     ManagementChartMode Mode = ManagementChartMode.YieldBars, string AxisTitle = "良率（%）", double TargetYield = 85,
     double?[]? SampleCounts = null, string[]? Descriptions = null, double CumulativeStart = 0)

@@ -20,6 +20,8 @@ internal sealed class StdfReader : IDisposable
     public byte Type { get; private set; }
     public byte Subtype { get; private set; }
     private int _length;
+    public byte[] Payload => _payload.AsSpan(0, _length).ToArray();
+    public long RecordStart => Offset - 4 - _length;
     public StdfFields Fields => new(_payload.AsSpan(0, _length), LittleEndian);
 
     public StdfReader(FileStream file, StdfWarnings? warnings = null)

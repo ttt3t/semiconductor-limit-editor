@@ -2,6 +2,11 @@ namespace SemiconductorCsvAnalyzer.Models;
 
 public sealed class TestItemData
 {
+    public string SourcePath { get; set; } = "";
+    public string SourceKey { get; set; } = "";
+    public string StdfLimitGroup { get; set; } = "";
+    public byte StdfKind { get; set; }
+    public LimitRule? Rule { get; set; }
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public TestItemFocus Focus { get; set; } = new();
     public int ColumnIndex { get; set; }
