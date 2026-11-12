@@ -66,6 +66,16 @@ static class PerformanceProbe
             var canceled = new CancellationToken(true); bool rejected = false;
             try { RejudgePreview.Compute(smallSession, snapshots, summaries, small.Records, RetestMode.Last, false, p, canceled); } catch (OperationCanceledException) { rejected = true; }
             Check(rejected, "cancellation stops the complete preview pipeline");
+            string naPath = Path.Combine(root, "not-applicable.csv");
+            File.WriteAllText(naPath, "SN,X,Y,Site,SBIN,HBIN,Wafer,A,B\nLSL,,,,,,,0,0\nUSL,,,,,,,2,2\nUNIT,,,,,,,V,V\nNUM,,,,,,,1,2\nR0,0,0,1,1000,1,W,STDF_NOT_APPLICABLE,1\nR1,1,0,1,1000,1,W,1,1\nR2,2,0,1,2000,2,W,bad,1\nR3,3,0,1,2000,2,W,,1\nR4,4,0,1,2000,2,W,STDF_NOT_APPLICABLE,1\n");
+            var na = DataFileService.Parse(naPath, Config());
+            // Disposing the raw cache proves that the loaded numeric/status representation is sufficient.
+            na.Records[0].Measurements.RawStore!.Dispose();
+            var naSession = new RejudgeSession(na, settings); var naResults = naSession.Evaluate();
+            Check(naSession.Rules[na.Items[0].Id].Category == RuleCategory.Effective && naSession.Rules[na.Items[0].Id].ReferenceCount == 1, "sparse numeric columns retain explicit N/A reference exclusions without raw IO");
+            Check(naResults[0].Grade == RejudgeGrade.Pass && naResults[2].Grade == RejudgeGrade.Pending && naResults[3].Grade == RejudgeGrade.Pending && naResults[4].Grade == RejudgeGrade.Pass, "N/A, invalid and missing remain distinct with the raw cache closed");
+            var view = DatasetService.CreateView(na, na.Records.Take(2).Select(DatasetService.CloneRecord).ToList());
+            var viewed = new RejudgeSession(view, settings); Check(viewed.Evaluate().All(r => r.Grade == RejudgeGrade.Pass), "identity/filter views share N/A status bits with the source columns");
             string largePath = Fixture(Path.Combine(root, "large"), 50000, 256);
             var watch = Stopwatch.StartNew(); var data = DataFileService.Parse(largePath, Config()); using var lease = new DatasetLease(data.Records);
             Console.WriteLine($"PERF import: {watch.Elapsed.TotalSeconds:F2}s, 50,000 records x 256 measurements (12.8 million cells)");

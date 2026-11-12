@@ -10,6 +10,8 @@ public sealed class TestValueColumn : IList<TestValue>, IReadOnlyList<TestValue>
     private float[]? _singleNumbers;
     private IReadOnlyList<CsvRecord> _records = Array.Empty<CsvRecord>();
     private int[]? _validRows;
+    // Lazily allocated only for explicit STDF N/A cells; one bit per source row, shared by views.
+    private byte[]? _notApplicable;
     private bool _compact, _completed;
     private string? _testId;
     private int _count;
@@ -17,6 +19,13 @@ public sealed class TestValueColumn : IList<TestValue>, IReadOnlyList<TestValue>
     private int[]? _sourceRows;
     private bool _sharedStorage;
     internal IReadOnlyList<CsvRecord> RowRecords => _records;
+    internal bool IsNotApplicable(int row) => _source != null ? _source.IsNotApplicable(_sourceRows![row])
+        : _notApplicable != null && (_notApplicable[row >> 3] & (1 << (row & 7))) != 0;
+    internal void MarkNotApplicable(int row)
+    {
+        _notApplicable ??= new byte[(_records.Count + 7) / 8];
+        _notApplicable[row >> 3] |= (byte)(1 << (row & 7));
+    }
     internal int SourceRowAt(int index) => Row(index);
     public int Count => _count;
     public bool IsReadOnly => false;
@@ -73,7 +82,7 @@ public sealed class TestValueColumn : IList<TestValue>, IReadOnlyList<TestValue>
 
     internal void Initialize(IReadOnlyList<CsvRecord> records, string testId, bool preferSingle = false)
     {
-        _source = null; _sourceRows = null; _sharedStorage = false;
+        _source = null; _sourceRows = null; _sharedStorage = false; _notApplicable = null;
         _records = records; _testId = testId;
         if (preferSingle)
         {
@@ -183,7 +192,7 @@ public sealed class TestValueColumn : IList<TestValue>, IReadOnlyList<TestValue>
         var numbers = new double[_count];
         var records = new List<CsvRecord>(_count);
         for (int i = 0; i < _count; i++) { int row = Row(i); numbers[i] = GetValueAt(i); records.Add(_records[row]); }
-        _numbers = numbers; _singleNumbers = null; _records = records; _validRows = null; _testId = null;
+        _numbers = numbers; _singleNumbers = null; _records = records; _validRows = null; _notApplicable = null; _testId = null;
         _source = null; _sourceRows = null; _sharedStorage = false;
         _compact = _completed = false;
     }
@@ -196,7 +205,7 @@ public sealed class TestValueColumn : IList<TestValue>, IReadOnlyList<TestValue>
     }
     public void AddRange(IEnumerable<TestValue> values) { foreach (var value in values) Add(value); }
     public void Clear()
-    { _numbers = Array.Empty<double>(); _singleNumbers = null; _records = Array.Empty<CsvRecord>(); _validRows = null; _testId = null; _count = 0; _compact = _completed = false; _source = null; _sourceRows = null; _sharedStorage = false; }
+    { _numbers = Array.Empty<double>(); _singleNumbers = null; _records = Array.Empty<CsvRecord>(); _validRows = null; _testId = null; _count = 0; _notApplicable = null; _compact = _completed = false; _source = null; _sourceRows = null; _sharedStorage = false; }
     public int IndexOf(TestValue value)
     { for (int i = 0; i < Count; i++) if (this[i].Equals(value)) return i; return -1; }
     public bool Contains(TestValue value) => IndexOf(value) >= 0;

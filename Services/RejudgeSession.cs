@@ -82,6 +82,7 @@ public sealed class RejudgeSession
         {
             var raw = row.Measurements;
             if (!raw.ContainsKey(item.Id)) return 2;
+            if (numeric) return item.Values.IsNotApplicable(n) ? 3 : 2;
             if (raw.IsOnDisk && raw.Schema is { } schema && schema.Indices.TryGetValue(item.Id, out int index))
             {
                 var rawRow = raw.ReadRow(ref buffer);

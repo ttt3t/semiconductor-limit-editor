@@ -201,8 +201,9 @@ public static partial class DatasetService
                             rawBlank &= raw.IsWhiteSpace();
                             if (TryValue(raw, out double value))
                                 item.Values.SetRow(row, value);
-                            else if (!raw.SequenceEqual(StdfParser.NotApplicableValue))
-                                item.Errors.Add(record);
+                            else if (raw.SequenceEqual(StdfParser.NotApplicableValue))
+                                item.Values.MarkNotApplicable(row);
+                            else item.Errors.Add(record);
                         }
                     }
                 }
