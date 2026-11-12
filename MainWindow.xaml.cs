@@ -1135,7 +1135,7 @@ public partial class MainWindow : Window
         if (e.OriginalSource is DependencyObject source)
         {
             for (var node = source; node != null; node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
-                if (node is CheckBox or TextBox) return;
+                if (node is CheckBox or TextBox or RuleToggle) return;
         }
         DependencyObject? dep = e.OriginalSource as DependencyObject;
         while (dep != null && dep is not DataGridCell)

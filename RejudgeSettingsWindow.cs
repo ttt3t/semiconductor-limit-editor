@@ -24,6 +24,7 @@ public sealed class RejudgeSettingsWindow : Window
     }
     public RejudgeSettingsWindow(RejudgeSettings settings)
     {
+        NameScope.SetNameScope(this, new NameScope());
         Title = "良率调整与分 BIN"; Width = 720; Height = 730; MinWidth = 550; MinHeight = 400; WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var root = new DockPanel { Margin = new Thickness(20) }; Content = root;
         var footer = new StackPanel { Margin = new Thickness(0, 12, 0, 0) }; DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
@@ -50,7 +51,7 @@ public sealed class RejudgeSettingsWindow : Window
                 remove.Click += (_, _) => { editors.Remove(editor); rows.Children.Remove(line); };
             }
             foreach (var pair in pairs) Add(pair);
-            var add = new Button { Content = "+ 添加一组 BIN", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0), Padding = new Thickness(8, 3, 8, 3) }; contents.Children.Add(add); add.Click += (_, _) => Add(new(0, 0)); return editors;
+            var add = new Button { Content = "+ 添加一组 BIN", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0), Padding = new Thickness(8, 3, 8, 3) }; contents.Children.Add(add); add.Click += (_, _) => { Add(new(0, 0)); editors[^1].Software.Clear(); editors[^1].Hardware.Clear(); }; return editors;
         }
         var originalPass = Original("原始 Pass 识别（支持多组）", settings.OriginalPass, "OriginalPass");
         var originalPartial = Original("原始 PartialPass 识别（没有则保持空白）", settings.OriginalPartialPass, "OriginalPartial");

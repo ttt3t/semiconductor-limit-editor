@@ -44,7 +44,12 @@ jobs:
           $process = Start-Process $exe -ArgumentList '--smoke-test', ('"' + $log + '"') -PassThru
           if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'WPF smoke test timed out' }
           if (Test-Path $log) { Get-Content $log; Add-Content $env:GITHUB_STEP_SUMMARY '### WPF smoke test'; Get-Content $log | Add-Content $env:GITHUB_STEP_SUMMARY }
-          if ($process.ExitCode -ne 0 -or -not (Test-Path $log) -or -not (Select-String -Path $log -SimpleMatch 'ALL WPF REJUDGE SMOKE CHECKS PASSED')) { throw 'WPF smoke test failed' }
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $log) -or -not (Select-String -Path $log -SimpleMatch 'ALL WPF REJUDGE SMOKE CHECKS PASSED')) {
+            $details = if (Test-Path $log) { Get-Content $log -Raw } else { "No smoke log. Exit code $($process.ExitCode)" }
+            $details = $details.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=WPF smoke details::$details"
+            throw 'WPF smoke test failed'
+          }
       - name: Package executable, configuration and documentation
         shell: pwsh
         run: |
