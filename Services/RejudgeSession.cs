@@ -46,9 +46,10 @@ public sealed class RejudgeSession
                 if (numeric) _numericColumns.Add(item.Id);
                 var rule = new LimitRule { Key = item.SourceKey, Name = item.DisplayName, Unit = item.ShownUnit, SharedGroup = item.StdfLimitGroup,
                     OriginalLow = item.LowLimit, OriginalHigh = item.HighLimit, IsStdf = item.IsStdfMeasurement, Functional = item.StdfKind == 20, DisplayFactor = item.DisplayFactor };
+                int visited = 0;
                 foreach (int n in references)
                 {
-                    if ((n & 1023) == 0) { token.ThrowIfCancellationRequested(); AnalysisOperation.CheckCancellation(); }
+                    if ((++visited & 1023) == 0) { token.ThrowIfCancellationRequested(); AnalysisOperation.CheckCancellation(); }
                     int state = State(item, n, item.LowLimit, item.HighLimit, true, numeric, ref buffer);
                     if (state == 3) continue;
                     rule.ReferenceCount++; if (state == 1) rule.ReferenceFailures++; if (state == 2) rule.ReferenceMissing++;

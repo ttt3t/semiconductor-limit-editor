@@ -23,12 +23,16 @@ public sealed class LimitValueColumn : DataGridBoundColumn
     protected override FrameworkElement GenerateEditingElement(DataGridCell cell, object dataItem)
     {
         var editor = new TextBox { Padding = new Thickness(2, 0, 2, 0), BorderThickness = new Thickness(0), MinWidth = 25 };
-        editor.SetBinding(TextBox.TextProperty, new Binding(IsLower ? "Rule.NewLowText" : "Rule.NewHighText") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.Explicit });
+        editor.SetBinding(TextBox.TextProperty, new Binding(IsLower ? "Rule.NewLowText" : "Rule.NewHighText") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.LostFocus });
         return editor;
     }
     protected override object PrepareCellForEdit(FrameworkElement element, RoutedEventArgs e)
     { var editor = (TextBox)element; editor.Focus(); editor.SelectAll(); return editor.Text; }
     protected override bool CommitCellEdit(FrameworkElement element)
     { ((TextBox)element).GetBindingExpression(TextBox.TextProperty)?.UpdateSource(); return true; }
-    protected override void CancelCellEdit(FrameworkElement element, object uneditedValue) => ((TextBox)element).Text = (string)uneditedValue;
+    protected override void CancelCellEdit(FrameworkElement element, object uneditedValue)
+    {
+        var editor = (TextBox)element; editor.Text = (string)uneditedValue;
+        editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+    }
 }

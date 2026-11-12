@@ -160,7 +160,7 @@ public partial class MainWindow
                     var value = dialog.Value;
                     var session = await Task.Run(() => new RejudgeSession(_data, value, AnalysisOperation.Token, attachRules: false));
                     var prepared = await PrepareAnalysisAsync(_data, _config, session);
-                    AnalysisOperation.CheckCancellation();
+                    AnalysisOperation.CheckCancellation(); _operationCommitting = true;
                     await Task.Run(() => AtomicFile.WriteAllText(RejudgeSettingsPath, JsonSerializer.Serialize(value, LimitExportService.Json)));
                     _rejudgeSettings = value; CommitAnalysis(_data, prepared);
                 });

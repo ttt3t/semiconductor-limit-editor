@@ -86,6 +86,9 @@ public partial class MainWindow
             lines.Add($"PERF 5,000-item list, 60 virtualized scroll updates: {watch.Elapsed.TotalMilliseconds:F0} ms");
             Check(SmokeDescendants<DataGridRow>(DgTestItems).Count() < 150, "scrolling retains a bounded number of realized rows");
             Check(!SmokeDescendants<TextBox>(DgTestItems).Any(b => b.GetBindingExpression(TextBox.TextProperty)?.ParentBinding.Path.Path?.StartsWith("Rule.New") == true), "scrolling never instantiates inactive limit editors");
+            // The name column is correctly virtualized while the limit column is in view.
+            DgTestItems.ScrollIntoView(_summaries[0], DgTestItems.Columns.First(c => c.SortMemberPath == "DisplayName"));
+            DgTestItems.UpdateLayout(); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             var toggle = SmokeDescendants<RuleToggle>(DgTestItems).First(); bool was = toggle.Rule!.Participates; toggle.Toggle();
             Check(toggle.Rule.Participates != was && VisualTreeHelper.GetChildrenCount(toggle) == 0, "lightweight participation control toggles without a child visual tree");
             string large = Path.Combine(folder, "large.csv"); Fixture(large, 10000, 256); await OpenManagedFileAsync(large, config, StdfImportMode.Standard, RetestMode.Last);
