@@ -16,6 +16,8 @@ public sealed class TestValueColumn : IList<TestValue>, IReadOnlyList<TestValue>
     private TestValueColumn? _source;
     private int[]? _sourceRows;
     private bool _sharedStorage;
+    internal IReadOnlyList<CsvRecord> RowRecords => _records;
+    internal int SourceRowAt(int index) => Row(index);
     public int Count => _count;
     public bool IsReadOnly => false;
     internal double GetSourceRowValue(int row)

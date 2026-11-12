@@ -9,10 +9,12 @@ public sealed class TestItemSummary : INotifyPropertyChanged
 
     public TestItemData Data { get; set; } = null!;
 
-    public LimitRule? Rule => Data.Rule;
+    private LimitRule? _rule;
+    public LimitRule? Rule { get => _rule ?? Data.Rule; set => _rule = value; }
+    private static readonly PropertyChangedEventArgs YieldChangeEvent = new(nameof(YieldChange)), YieldDetailEvent = new(nameof(YieldDetail));
     private string _yieldChange = "—", _yieldDetail = "";
-    public string YieldChange { get => _yieldChange; set { _yieldChange = value; PropertyChanged?.Invoke(this, new(nameof(YieldChange))); } }
-    public string YieldDetail { get => _yieldDetail; set { _yieldDetail = value; PropertyChanged?.Invoke(this, new(nameof(YieldDetail))); } }
+    public string YieldChange { get => _yieldChange; set { if (_yieldChange == value) return; _yieldChange = value; PropertyChanged?.Invoke(this, YieldChangeEvent); } }
+    public string YieldDetail { get => _yieldDetail; set { if (_yieldDetail == value) return; _yieldDetail = value; PropertyChanged?.Invoke(this, YieldDetailEvent); } }
     public string TestNumber => Data.TestNumber;
     public string DisplayName => Data.DisplayName;
     public string SBin => Data.SBin;

@@ -4,11 +4,11 @@ STDF / CSV 阈值修改与 DUT 重新分 BIN 的 Windows WPF 工具，基于 Sem
 
 直接使用分析器主界面：新增新 LSL、新 USL、良率变化三列；冻结原始良品分类，按参与测项逐条重判，在新文件内同步受影响 DUT 的 SBIN/HBIN。支持 CSV 原文保留、STDF 原记录流写出、大小端/gzip、计数同步及规则/变更清单。
 
-[使用说明与发行边界](Docs/ReleaseNotes-3.0.0.md) · [完整方案](Docs/RejudgePlan.md) · [原分析器基线说明](BASELINE_README.md)
+[使用说明与发行边界](Docs/ReleaseNotes-3.0.1.md) · [完整方案](Docs/RejudgePlan.md) · [原分析器基线说明](BASELINE_README.md)
 
 ## 下载与运行
 
-在 [Releases](https://github.com/ttt3t/semiconductor-limit-editor/releases) 下载 `SemiconductorLimitEditor-3.0.0-win-x64-framework-dependent.zip`。安装 **.NET 8 Windows Desktop Runtime x64**，解压后运行 `SemiconductorLimitEditor.exe`。设置保存在独立的 `%LOCALAPPDATA%\SemiconductorLimitEditor`，不使用旧分析器的产品目录。
+在 [Releases](https://github.com/ttt3t/semiconductor-limit-editor/releases) 下载 `SemiconductorLimitEditor-3.0.1-win-x64-framework-dependent.zip`。安装 **.NET 8 Windows Desktop Runtime x64**，解压后运行 `SemiconductorLimitEditor.exe`。设置保存在独立的 `%LOCALAPPDATA%\SemiconductorLimitEditor`，不使用旧分析器的产品目录。
 
 ## 开发与验证
 
@@ -23,6 +23,7 @@ Linux 可以交叉编译（加 `-p:EnableWindowsTargeting=true`），并运行�
 
 ```bash
 bash Tests/run-rejudge.sh
+bash Tests/run-rejudge-performance.sh
 bash Tests/run-core-memory.sh
 bash Tests/run-good-retest.sh
 bash Tests/run-import-progress.sh

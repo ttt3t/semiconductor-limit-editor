@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -13,33 +12,49 @@ public partial class MainWindow
 {
     private RejudgeSession? _rejudge;
     private RejudgeSettings _rejudgeSettings = new();
-    private readonly DispatcherTimer _rejudgeTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly DispatcherTimer _rejudgeTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private readonly DispatcherTimer _rejudgeProgressTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly SemaphoreSlim _rejudgeGate = new(1, 1);
     private CancellationTokenSource? _rejudgeCancellation;
+    private RejudgeProgress? _rejudgeProgress;
+    private RejudgePreviewResult? _lastPreview;
     private int _rejudgeVersion;
     private bool _linkingRules;
-    private Dictionary<TestItemSummary, (double? Low, double? High, bool Flags, string Text, string Detail)> _yieldPreviewCache = new();
-    private HashSet<string> _yieldSelectedIds = new(), _yieldScopeIds = new();
     private static string RejudgeSettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SemiconductorLimitEditor", "rejudge.json");
     private void InitializeRejudge()
     {
         try { if (File.Exists(RejudgeSettingsPath)) _rejudgeSettings = JsonSerializer.Deserialize<RejudgeSettings>(File.ReadAllText(RejudgeSettingsPath)) ?? new(); _rejudgeSettings.Validate(); }
         catch (Exception ex) { MessageBox.Show("分 BIN 设置读取失败，使用默认值：" + ex.Message); _rejudgeSettings = new(); }
         _rejudgeTimer.Tick += async (_, _) => { _rejudgeTimer.Stop(); await RecalculateRejudgeAsync(); };
-        Closed += (_, _) => { _rejudgeTimer.Stop(); _rejudgeCancellation?.Cancel(); };
+        _rejudgeProgressTimer.Tick += (_, _) =>
+        {
+            if (_rejudgeProgress == null) return;
+            var p = _rejudgeProgress.Latest;
+            RejudgeProgressBar.Value = p.Fraction * 100; TxtRejudgeProgress.Text = $"{p.Stage} · {(int)(p.Fraction * 100)}%";
+        };
+        Closed += (_, _) => { StopRejudge(); _rejudgeProgressTimer.Stop(); _lastPreview = null; };
+    }
+    private void StopRejudge()
+    {
+        _rejudgeVersion++; _rejudgeTimer.Stop(); _rejudgeCancellation?.Cancel();
+        _rejudgeProgress = null; _rejudgeProgressTimer.Stop();
+        RejudgeProgressPanel.Visibility = Visibility.Collapsed;
     }
     private void AttachRejudge(RejudgeSession session)
     {
         if (!ReferenceEquals(_rejudge, session))
         {
+            StopRejudge(); _lastPreview = null;
             if (_rejudge != null) foreach (var rule in _rejudge.Rules.Values) rule.PropertyChanged -= RuleChanged;
             _rejudge = session;
+            foreach (var item in session.Data.Items) item.Rule = session.Rules[item.Id];
             foreach (var rule in session.Rules.Values) rule.PropertyChanged += RuleChanged;
         }
         ScheduleRejudge();
     }
     private void RuleChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (_linkingRules || _rejudge == null) return;
+        if (_linkingRules || _rejudge == null || e.PropertyName is not (nameof(LimitRule.NewLowText) or nameof(LimitRule.NewHighText) or nameof(LimitRule.Participates))) return;
         if (sender is LimitRule rule && rule.SharedGroup.Length > 0 && e.PropertyName is nameof(LimitRule.NewLowText) or nameof(LimitRule.NewHighText))
         {
             _linkingRules = true;
@@ -50,70 +65,83 @@ public partial class MainWindow
     }
     private void ScheduleRejudge()
     {
+        if (_closing) return;
         _rejudgeVersion++; _rejudgeCancellation?.Cancel(); _rejudgeTimer.Stop(); _rejudgeTimer.Start();
-        if (TxtRejudge != null) TxtRejudge.Text = "正在重新判定…";
+        if (TxtRejudge != null) TxtRejudge.Text = "等待重算…（显示值尚未更新）";
+        ExportRejudgedButton.IsEnabled = false;
     }
+    private async void RecalculateNow_Click(object sender, RoutedEventArgs e)
+    { _rejudgeTimer.Stop(); await RecalculateRejudgeAsync(); }
+    private void CancelRejudge_Click(object sender, RoutedEventArgs e)
+    { StopRejudge(); TxtRejudge.Text = "已取消良率重算；保留上次完成的预览，当前修改尚未计算。"; }
+    private void LimitBeginningEdit(object sender, DataGridBeginningEditEventArgs e)
+    { if (e.Column is Controls.LimitValueColumn && e.Row.Item is TestItemSummary { Rule: { Functional: true } }) e.Cancel = true; }
     private async Task RecalculateRejudgeAsync()
     {
-        if (_rejudge == null || _closing) return;
-        var session = _rejudge; int version = _rejudgeVersion;
-        var cancellation = new CancellationTokenSource(); _rejudgeCancellation = cancellation;
+        if (_rejudge == null || _closing || _isBusy) return;
+        var session = _rejudge; int version = ++_rejudgeVersion;
+        _rejudgeCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource(); _rejudgeCancellation = cancellation;
+        var progress = _rejudgeProgress = new RejudgeProgress();
+        RejudgeProgressPanel.Visibility = Visibility.Visible; RejudgeProgressBar.Value = 0; TxtRejudgeProgress.Text = "准备重算… · 0%";
+        _rejudgeProgressTimer.Start(); ExportRejudgedButton.IsEnabled = false;
+        bool entered = false;
         try
         {
-            var summaries = _summaries.ToArray();
-            // Capture editable rules before leaving the dispatcher.
-            var snapshots = session.Rules.ToDictionary(p => p.Key, p => (Limits: p.Value.Limits(), p.Value.LowChanged, p.Value.HighChanged));
-            var scope = ActiveData.Records.Select(r => r.Id).ToHashSet();
-            var previousCache = _yieldPreviewCache; var previousSelected = _yieldSelectedIds; var previousScope = _yieldScopeIds;
-            var mode = _retestMode; bool prefer = _config.PreferGoodRetest;
-            var computed = await Task.Run(() =>
-            {
-                var results = session.Evaluate(cancellation.Token);
-                var selected = RejudgeSession.Select(session.Data, results, mode, prefer);
-                var changes = new Dictionary<TestItemSummary, (string Text, string Detail)>();
-                var selectedIds = selected.Select(r => r.RecordId).ToHashSet();
-                bool sameRows = previousSelected.SetEquals(selectedIds) && previousScope.SetEquals(scope);
-                foreach (var s in summaries)
-                {
-                    cancellation.Token.ThrowIfCancellationRequested(); var limits = snapshots[s.Data.Id].Limits;
-                    bool flags = !snapshots[s.Data.Id].LowChanged && !snapshots[s.Data.Id].HighChanged;
-                    if (sameRows && previousCache.TryGetValue(s, out var cached) && cached.Low == limits.Low && cached.High == limits.High && cached.Flags == flags)
-                    { changes[s] = (cached.Text, cached.Detail); continue; }
-                    int total = 0, oldPass = 0, newPass = 0;
-                    int visited = 0;
-                    foreach (var r in session.Data.Records)
-                    {
-                        if ((++visited & 255) == 0) cancellation.Token.ThrowIfCancellationRequested();
-                        if (!scope.Contains(r.Id) || !selectedIds.Contains(r.Id) || !s.IsCombined && s.Site != r.Site || !s.IsWaferCombined && s.Wafer != r.WaferId) continue;
-                        if (!r.Measurements.TryGetValue(s.Data.Id, out var text) || !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || !double.IsFinite(v)) continue;
-                        total++;
-                        bool old = !(v < s.Data.LowLimit || v > s.Data.HighLimit) && r.ExplicitTestFailures?.Contains(s.Data.Id) != true;
-                        if (old) oldPass++;
-                        if (!(v < limits.Low || v > limits.High) && (snapshots[s.Data.Id].LowChanged || snapshots[s.Data.Id].HighChanged || r.ExplicitTestFailures?.Contains(s.Data.Id) != true)) newPass++;
-                    }
-                    double oldYield = total == 0 ? 0 : 100.0 * oldPass / total, newYield = total == 0 ? 0 : 100.0 * newPass / total;
-                    changes[s] = (total == 0 ? "—" : (newYield - oldYield).ToString("+0.00;-0.00;0.00") + " pp", $"同一统计范围内有效样本 {total}；原良率 {oldYield:F3}%，新良率 {newYield:F3}%。不等同整颗 DUT 良率。STDF 采用 R*4 实际可写限值。");
-                }
-                return (selected, changes, selectedIds);
-            }, cancellation.Token);
-            if (version != _rejudgeVersion || _closing) return;
-            var rows = computed.selected;
-            double Yield(bool original) => rows.Count == 0 ? 0 : 100.0 * rows.Count(r => (original ? r.Original : r.Grade) is RejudgeGrade.Pass or RejudgeGrade.PartialPass) / rows.Count;
-            TxtRejudge.Text = $"DUT {rows.Count} · 原 {Yield(true):F2}% → 新 {Yield(false):F2}% · 恢复 {rows.Count(r => r.Changed && r.Original == RejudgeGrade.Fail)} · 新增不良 {rows.Count(r => r.Changed && r.Grade == RejudgeGrade.Fail)} · 待确认 {rows.Count(r => r.Grade == RejudgeGrade.Pending)}";
-            if (rows.Any(r => r.Grade == RejudgeGrade.Disabled)) TxtRejudge.Text = "未启用判定规则，保留原 BIN";
-            TxtRejudge.ToolTip = "整体统计使用全部导入来源的整条首/末次记录；良品优先按新结果选最新良品。导出保留所有测试记录。";
-            _yieldSelectedIds = computed.selectedIds; _yieldScopeIds = scope;
-            _yieldPreviewCache = computed.changes.ToDictionary(p => p.Key, p => (snapshots[p.Key.Data.Id].Limits.Low, snapshots[p.Key.Data.Id].Limits.High, !snapshots[p.Key.Data.Id].LowChanged && !snapshots[p.Key.Data.Id].HighChanged, p.Value.Text, p.Value.Detail));
-            foreach (var pair in computed.changes) { pair.Key.YieldChange = pair.Value.Text; pair.Key.YieldDetail = pair.Value.Detail; }
+            // Pin only the existing store handles. Do not enumerate millions of records on the dispatcher.
+            using var lease = _datasetLease?.Fork();
+            var summaries = _summaries; var scope = ActiveData.Records; var edits = session.CaptureEdits();
+            var mode = _retestMode; bool prefer = _config.PreferGoodRetest; var previous = _lastPreview;
+            await _rejudgeGate.WaitAsync(cancellation.Token); entered = true;
+            cancellation.Token.ThrowIfCancellationRequested();
+            var computed = await Task.Run(() => RejudgePreview.Compute(session, edits, summaries, scope, mode, prefer, previous,
+                cancellation.Token, progress.Report), cancellation.Token);
+            if (version != _rejudgeVersion || _closing || cancellation.IsCancellationRequested) return;
+            // Only realized rows have binding listeners; unchanged properties send no notifications.
+            foreach (var pair in computed.Items) { pair.Key.YieldChange = pair.Value.Text; pair.Key.YieldDetail = pair.Value.Detail; }
+            _lastPreview = computed;
+            TxtRejudge.Text = computed.Summary;
+            TxtRejudge.ToolTip = computed.Warning ?? "整体统计使用全部导入来源的整条首/末次记录；良品优先按新结果选择。";
+            if (computed.Warning != null) TxtRejudge.Text += " · 警告：未识别到原始良品参考";
+            ExportRejudgedButton.IsEnabled = true; progress.Complete();
+            RejudgeProgressBar.Value = 100; TxtRejudgeProgress.Text = "良率重算完成 · 100%";
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { if (version == _rejudgeVersion) TxtRejudge.Text = "规则无效，禁止导出：" + ex.Message; }
-        finally { if (ReferenceEquals(_rejudgeCancellation, cancellation)) _rejudgeCancellation = null; cancellation.Dispose(); }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (version != _rejudgeVersion || _closing) return;
+            string message = ex is OutOfMemoryException ? "内存不足，已停止重算并保留上次结果。请减少同时打开的数据后重试。" : ex.Message;
+            TxtRejudge.Text = "重算未完成，禁止导出：" + message;
+            try
+            {
+                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SemiconductorLimitEditor", "Logs", $"rejudge-failure-{DateTime.Now:yyyyMMdd-HHmmss-fff}.log");
+                AtomicFile.WriteAllText(path, ex.ToString()); TxtRejudge.ToolTip = "诊断日志：" + path;
+            }
+            catch (Exception) { TxtRejudge.ToolTip = message; }
+        }
+        finally
+        {
+            if (entered) _rejudgeGate.Release();
+            if (ReferenceEquals(_rejudgeCancellation, cancellation))
+            {
+                _rejudgeCancellation = null; _rejudgeProgress = null; _rejudgeProgressTimer.Stop();
+                RejudgeProgressPanel.Visibility = Visibility.Collapsed;
+            }
+        }
     }
     private void RuleCategoryChanged(object sender, SelectionChangedEventArgs e) { if (DgTestItems != null) ApplySearchFilter(_currentItem?.DisplayName, _currentSite, _currentWafer); }
     private void EnableVisibleRules(object sender, RoutedEventArgs e)
-    { foreach (var rule in DgTestItems.Items.OfType<TestItemSummary>().Select(s => s.Rule).OfType<LimitRule>().Distinct()) rule.Participates = true; }
-    private void ResetLimitRules(object sender, RoutedEventArgs e) { if (_rejudge != null) foreach (var rule in _rejudge.Rules.Values) rule.Reset(); }
+    {
+        _linkingRules = true;
+        try { foreach (var rule in DgTestItems.Items.OfType<TestItemSummary>().Select(s => s.Rule).OfType<LimitRule>().Distinct()) rule.Participates = true; }
+        finally { _linkingRules = false; ScheduleRejudge(); }
+    }
+    private void ResetLimitRules(object sender, RoutedEventArgs e)
+    {
+        _linkingRules = true;
+        try { if (_rejudge != null) foreach (var rule in _rejudge.Rules.Values) rule.Reset(); }
+        finally { _linkingRules = false; ScheduleRejudge(); }
+    }
     private void AddRejudgeSettings(SettingsWindow settings)
     {
         if (settings.FindName("SettingsTabs") is not TabControl tabs) return;
@@ -124,17 +152,22 @@ public partial class MainWindow
         {
             var dialog = new RejudgeSettingsWindow(_rejudgeSettings) { Owner = settings };
             if (dialog.ShowDialog() != true || dialog.Value == null) return;
+            button.IsEnabled = false; settings.Close();
             try
             {
-                AtomicFile.WriteAllText(RejudgeSettingsPath, JsonSerializer.Serialize(dialog.Value, LimitExportService.Json));
-                _rejudgeSettings = dialog.Value;
-                if (_data.Items.Count > 0)
+                await RunImportAsync(async () =>
                 {
-                    var session = await Task.Run(() => new RejudgeSession(_data, _rejudgeSettings)); AttachRejudge(session);
-                    await RefreshTestItemList();
-                }
+                    var value = dialog.Value;
+                    var session = await Task.Run(() => new RejudgeSession(_data, value, AnalysisOperation.Token, attachRules: false));
+                    var prepared = await PrepareAnalysisAsync(_data, _config, session);
+                    AnalysisOperation.CheckCancellation();
+                    await Task.Run(() => AtomicFile.WriteAllText(RejudgeSettingsPath, JsonSerializer.Serialize(value, LimitExportService.Json)));
+                    _rejudgeSettings = value; CommitAnalysis(_data, prepared);
+                });
             }
+            catch (OperationCanceledException) { }
             catch (Exception ex) { MessageBox.Show(ex.Message, "分 BIN 设置失败"); }
+            finally { button.IsEnabled = true; }
         };
         tabs.Items.Insert(0, new TabItem { Header = "良率调整与分 BIN", Content = panel });
     }
@@ -153,9 +186,18 @@ public partial class MainWindow
         try
         {
             var plan = LimitExportService.ReadPlan(dialog.FileName);
-            var session = await Task.Run(() => new RejudgeSession(_data, plan.Settings));
-            LimitExportService.ApplyPlan(session, plan.Rules); _rejudgeSettings = plan.Settings; AttachRejudge(session); await RefreshTestItemList();
+            await RunImportAsync(async () =>
+            {
+                var session = await Task.Run(() =>
+                {
+                    var created = new RejudgeSession(_data, plan.Settings, AnalysisOperation.Token, attachRules: false);
+                    LimitExportService.ApplyPlan(created, plan.Rules); return created;
+                });
+                var prepared = await PrepareAnalysisAsync(_data, _config, session);
+                AnalysisOperation.CheckCancellation(); _rejudgeSettings = plan.Settings; CommitAnalysis(_data, prepared);
+            });
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex) { MessageBox.Show(ex.Message, "加载规则失败"); }
     }
     private async void ExportRejudged(object sender, RoutedEventArgs e)

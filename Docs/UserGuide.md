@@ -1,4 +1,4 @@
-# Semiconductor Limit Editor 3.0.0
+# Semiconductor Limit Editor 3.0.1
 
 Windows x64，依赖框架的单 EXE 发行版。先安装 **Microsoft .NET 8 Windows Desktop Runtime x64**（不是仅安装 ASP.NET/Core Runtime）：https://dotnet.microsoft.com/download/dotnet/8.0 。解压 ZIP，运行 `SemiconductorLimitEditor.exe`。不需要安装 Excel。保留基线 MIT 许可及历史。
 
@@ -10,6 +10,14 @@ Windows x64，依赖框架的单 EXE 发行版。先安装 **Microsoft .NET 8 Wi
 - 批量导出创建独立新目录，一进一出，附规则和逐记录变化/待确认清单；源文件指纹验证、失败/取消不发布部分结果。
 - CSV 布局完整时保留编码、分隔符、引号、多行表头与测量原文；缺少可写限值行或双 BIN 列时转为标准化 CSV 并附 `.ini`。
 - STDF 顺序写回 PTR/MPR 实际 R*4 限值、逐项判定、受影响 PRR 双 BIN/标志，并同步现有 HBR/SBR/PCR/WRR/TSR 计数；保留未修改记录、未知扩展、原大小端及 gzip。继承限值按执行记录显式写出，避免修改默认值影响其他规格。
+
+## 3.0.1：BIN 设置与大文件重算
+
+- 原始识别支持添加多组独立的 SBIN / HBIN 输入框，导出目标也分别填写；不再输入冒号。已有 JSON 配置兼容，升级保留原值。例如实际良品 SBIN=1000、HBIN=1，须在对应框分别填写 1000、1，软件不会擅自交换旧值。
+- 新 LSL / USL 平时显示文本，双击或 F2 进入编辑；Enter 或离开单元格提交，Escape 取消。只在提交后安排重算。FTR 显示“—”，使用参与开关控制是否参与重判。
+- 独立进度条显示后台重算阶段及百分比，可以继续滚动或取消；“重算良率”可重新启动。新编辑取消过期计算，后台串行执行，只有最新完整结果能更新预览。取消或失败保留上次完成的预览，未完成期间禁止导出重判文件。
+- 重判与单项预览复用已加载数值列；缺测/不适用状态使用可复用缓冲，避免按测项反复分配完整原文行。后台持有数据快照句柄，切换文件不会提前关闭读取中的缓存。
+- 未识别原始良品时显示明确警告，未经参考验证的色标为灰色。异常重算日志位于 `%LOCALAPPDATA%\SemiconductorLimitEditor\Logs`。
 
 ## 使用
 

@@ -156,7 +156,8 @@
         </Border>
         <Border DockPanel.Dock="Top" Background="#EFF6FF" Padding="10,4">
             <WrapPanel VerticalAlignment="Center">
-                <Button Content="导出重判文件…" Click="ExportRejudged" Padding="9,3" Margin="0,0,6,0"/>
+                <Button x:Name="ExportRejudgedButton" Content="导出重判文件…" Click="ExportRejudged" Padding="9,3" Margin="0,0,6,0"/>
+                <Button Content="重算良率" Click="RecalculateNow_Click" Padding="6,3"/>
                 <Button Content="保存规则" Click="SaveLimitPlan" Padding="6,3"/>
                 <Button Content="加载规则" Click="LoadLimitPlan" Padding="6,3"/>
                 <Button Content="恢复原限值" Click="ResetLimitRules" Padding="6,3"/>
@@ -166,6 +167,13 @@
                 <Button Content="开启可见项" Click="EnableVisibleRules" Padding="6,3"/>
                 <TextBlock x:Name="TxtRejudge" Text="打开文件以调整阈值" Margin="10,4" TextWrapping="Wrap"/>
             </WrapPanel>
+        </Border>
+        <Border x:Name="RejudgeProgressPanel" DockPanel.Dock="Top" Padding="10,4" Background="#EFF6FF" Visibility="Collapsed">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="取消重算" Click="CancelRejudge_Click" Margin="8,0,0,0" Padding="8,2"/>
+                <TextBlock x:Name="TxtRejudgeProgress" DockPanel.Dock="Right" Width="230" Margin="10,0" VerticalAlignment="Center"/>
+                <ProgressBar x:Name="RejudgeProgressBar" Minimum="0" Maximum="100" Height="8" VerticalAlignment="Center" AutomationProperties.Name="良率重算进度"/>
+            </DockPanel>
         </Border>
         <Border DockPanel.Dock="Bottom" Background="{StaticResource WorkspaceBackground}" Padding="14,5" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0">
             <Grid>
@@ -265,7 +273,7 @@
                     </Grid>
                 </Border>
                 <controls:FastDataGrid x:Name="DgTestItems" BorderThickness="0" Background="White"
-                          AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False"
+                          AutoGenerateColumns="False" IsReadOnly="False" CanUserAddRows="False" CanUserDeleteRows="False" BeginningEdit="LimitBeginningEdit"
                           CanUserSortColumns="True" CanUserReorderColumns="True" CanUserResizeColumns="True" CanUserResizeRows="False" MinColumnWidth="40"
                           SelectionMode="Single" SelectionChanged="DgTestItems_SelectionChanged"
                           PreviewMouseUp="TestItems_HeaderRightClick" PreviewMouseDoubleClick="DgTestItems_PreviewMouseDoubleClick"
@@ -323,7 +331,7 @@
                     </Style></DataGrid.CellStyle>
 
                     <DataGrid.Columns>
-                        <DataGridTemplateColumn x:Name="FocusColumn" SortMemberPath="Data.Focus.IsFocused" CanUserSort="False" Width="62" MinWidth="55">
+                        <DataGridTemplateColumn IsReadOnly="True" x:Name="FocusColumn" SortMemberPath="Data.Focus.IsFocused" CanUserSort="False" Width="62" MinWidth="55">
                             <DataGridTemplateColumn.Header><StackPanel>
                                 <TextBlock Text="关注" Style="{StaticResource ColHeaderLabel}" ToolTip="双击表头：全选 / 取消当前筛选内的全部测试项"/>
                                 <Grid Margin="0,3,0,0" ClipToBounds="True">
@@ -343,7 +351,7 @@
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding TestNumber, Mode=OneTime}" SortMemberPath="TestNumberValue" Width="110">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding TestNumber, Mode=OneTime}" SortMemberPath="TestNumberValue" Width="110">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Test Num" Style="{StaticResource ColHeaderLabel}"/>
@@ -359,7 +367,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTemplateColumn SortMemberPath="DisplayName" Width="150">
+                        <DataGridTemplateColumn IsReadOnly="True" SortMemberPath="DisplayName" Width="150">
                             <DataGridTemplateColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Test Item" Style="{StaticResource ColHeaderLabel}"/>
@@ -375,14 +383,13 @@
                                 </StackPanel>
                             </DataGridTemplateColumn.Header>
                         <DataGridTemplateColumn.CellTemplate><DataTemplate>
-                                <StackPanel Orientation="Horizontal" ToolTip="{Binding Rule.Diagnosis}">
-                                    <CheckBox IsChecked="{Binding Rule.Participates, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="参与 DUT 重新分 BIN（独立于关注）" Margin="0,0,4,0"/>
-                                    <TextBlock Text="●" Foreground="{Binding Rule.CategoryColor}" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center"/>
-                                </StackPanel>
+                                <DockPanel LastChildFill="True">
+                                    <controls:RuleToggle Rule="{Binding Rule, Mode=OneWay}" DockPanel.Dock="Left"/>
+                                    <TextBlock Text="{Binding DisplayName, Mode=OneTime}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
                             </DataTemplate></DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Site, Mode=OneTime}" SortMemberPath="SiteSort" Width="70">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Site, Mode=OneTime}" SortMemberPath="SiteSort" Width="70">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Site" Style="{StaticResource ColHeaderLabel}"/>
@@ -398,7 +405,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Wafer, Mode=OneTime}" SortMemberPath="Wafer" Width="90">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Wafer, Mode=OneTime}" SortMemberPath="Wafer" Width="90">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Wafer" Style="{StaticResource ColHeaderLabel}"/>
@@ -413,7 +420,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding SBin, Mode=OneTime}" SortMemberPath="SBinSort" Width="55">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding SBin, Mode=OneTime}" SortMemberPath="SBinSort" Width="55">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="SBIN" Style="{StaticResource ColHeaderLabel}"/>
@@ -429,7 +436,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding HBin, Mode=OneTime}" SortMemberPath="HBinSort" Width="55">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding HBin, Mode=OneTime}" SortMemberPath="HBinSort" Width="55">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="HBIN" Style="{StaticResource ColHeaderLabel}"/>
@@ -445,7 +452,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Unit, Mode=OneTime}" SortMemberPath="Unit" Width="50">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Unit, Mode=OneTime}" SortMemberPath="Unit" Width="50">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Unit" Style="{StaticResource ColHeaderLabel}"/>
@@ -461,7 +468,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding LslText, Mode=OneTime}" SortMemberPath="LslSort" Width="70">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding LslText, Mode=OneTime}" SortMemberPath="LslSort" Width="70">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="LSL" Style="{StaticResource ColHeaderLabel}"/>
@@ -477,7 +484,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding UslText, Mode=OneTime}" SortMemberPath="UslSort" Width="70">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding UslText, Mode=OneTime}" SortMemberPath="UslSort" Width="70">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="USL" Style="{StaticResource ColHeaderLabel}"/>
@@ -493,16 +500,12 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTemplateColumn Header="新 LSL" Width="95" SortMemberPath="Rule.NewLowText">
-                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewLowText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="{Binding Rule.WritableLimitsText}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTemplateColumn Header="新 USL" Width="95" SortMemberPath="Rule.NewHighText">
-                            <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBox Text="{Binding Rule.NewHighText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Padding="2,0" ToolTip="{Binding Rule.WritableLimitsText}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTemplateColumn Header="良率变化" Width="100" SortMemberPath="YieldChange">
+                        <controls:LimitValueColumn Binding="{Binding Rule.NewLowText, Mode=TwoWay, UpdateSourceTrigger=Explicit}" Header="新 LSL" Width="95" IsLower="True" SortMemberPath="Rule.NewLowText"/>
+                        <controls:LimitValueColumn Binding="{Binding Rule.NewHighText, Mode=TwoWay, UpdateSourceTrigger=Explicit}" Header="新 USL" Width="95" IsLower="False" SortMemberPath="Rule.NewHighText"/>
+                        <DataGridTemplateColumn IsReadOnly="True" Header="良率变化" Width="100" SortMemberPath="YieldChange">
                             <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding YieldChange}" ToolTip="{Binding YieldDetail}"/></DataTemplate></DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Count, Mode=OneTime}" SortMemberPath="Count" Width="55">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Count, Mode=OneTime}" SortMemberPath="Count" Width="55">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Count" Style="{StaticResource ColHeaderLabel}"/>
@@ -518,7 +521,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" CellStyle="{StaticResource FailsCell}"
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" CellStyle="{StaticResource FailsCell}"
                                             Binding="{Binding Fails, Mode=OneTime}" SortMemberPath="Fails" Width="60">
                             <DataGridTextColumn.Header><StackPanel>
                                 <TextBlock Text="Fails" Style="{StaticResource ColHeaderLabel}" AutomationProperties.HelpText="超出 LSL 或 USL 的有效测量样品数；缺测和无效值计入 Error"/>
@@ -532,7 +535,7 @@
                                     </Grid>
                             </StackPanel></DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Eorr, Mode=OneTime}" SortMemberPath="Eorr" Width="60">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Eorr, Mode=OneTime}" SortMemberPath="Eorr" Width="60">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Error" Style="{StaticResource ColHeaderLabel}" ToolTip="当前测试项的空值、缺列、非数值及非有限值数量"/>
@@ -547,7 +550,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding SiteSigma, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="SiteSigma" Width="75">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding SiteSigma, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="SiteSigma" Width="75">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Site σ" Style="{StaticResource ColHeaderLabel}" ToolTip="Combine Site 时，各有有效数据的 Site 良率的总体标准差（百分点）；各 Site 等权"/>
@@ -562,7 +565,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Mean, StringFormat=G6, Mode=OneTime}" SortMemberPath="Mean" Width="80">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Mean, StringFormat=G6, Mode=OneTime}" SortMemberPath="Mean" Width="80">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Mean" Style="{StaticResource ColHeaderLabel}"/>
@@ -578,7 +581,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Max, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Max" Width="80">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Max, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Max" Width="80">
                             <DataGridTextColumn.Header><StackPanel>
                                 <TextBlock Text="Max" Style="{StaticResource ColHeaderLabel}"/>
                                 <Grid Margin="0,3,0,0" ClipToBounds="True">
@@ -591,7 +594,7 @@
                                     </Grid>
                             </StackPanel></DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Min, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Min" Width="80">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Min, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Min" Width="80">
                             <DataGridTextColumn.Header><StackPanel>
                                 <TextBlock Text="Min" Style="{StaticResource ColHeaderLabel}"/>
                                 <Grid Margin="0,3,0,0" ClipToBounds="True">
@@ -604,7 +607,7 @@
                                     </Grid>
                             </StackPanel></DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn x:Name="RunValueColumn" ElementStyle="{StaticResource SummaryCellText}" CellStyle="{StaticResource RunValueCell}" Binding="{Binding RunValue, StringFormat=G9, TargetNullValue=-, Mode=OneWay}" SortMemberPath="RunValue" Width="90">
+                        <DataGridTextColumn IsReadOnly="True" x:Name="RunValueColumn" ElementStyle="{StaticResource SummaryCellText}" CellStyle="{StaticResource RunValueCell}" Binding="{Binding RunValue, StringFormat=G9, TargetNullValue=-, Mode=OneWay}" SortMemberPath="RunValue" Width="90">
                             <DataGridTextColumn.Header><StackPanel>
                                 <TextBlock Text="Value" Style="{StaticResource ColHeaderLabel}" ToolTip="Run 对应的原始测量值；其他 Site、缺测或无效值显示 -"/>
                                 <Grid Margin="0,3,0,0" ClipToBounds="True">
@@ -616,7 +619,7 @@
                                     </Grid>
                             </StackPanel></DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Median, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Median" Width="80">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Median, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Median" Width="80">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Median" Style="{StaticResource ColHeaderLabel}"/>
@@ -632,7 +635,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Sigma, StringFormat=G6, Mode=OneTime}" SortMemberPath="Sigma" Width="70">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Sigma, StringFormat=G6, Mode=OneTime}" SortMemberPath="Sigma" Width="70">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="σ" Style="{StaticResource ColHeaderLabel}"/>
@@ -648,7 +651,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding RobustMean, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="RobustMean" Width="100">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding RobustMean, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="RobustMean" Width="100">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Robust Mean" Style="{StaticResource ColHeaderLabel}"/>
@@ -664,7 +667,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding RobustSigma, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="RobustSigma" Width="100">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding RobustSigma, StringFormat=G6, TargetNullValue=-, Mode=OneTime}" SortMemberPath="RobustSigma" Width="100">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Robust Sigma" Style="{StaticResource ColHeaderLabel}"/>
@@ -680,7 +683,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Cpk, StringFormat=F3, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Cpk" Width="55">
+                        <DataGridTextColumn IsReadOnly="True" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding Cpk, StringFormat=F3, TargetNullValue=-, Mode=OneTime}" SortMemberPath="Cpk" Width="55">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="Cpk" Style="{StaticResource ColHeaderLabel}"/>
@@ -696,7 +699,7 @@
                                 </StackPanel>
                             </DataGridTextColumn.Header>
                         </DataGridTextColumn>
-                        <DataGridTextColumn CellStyle="{StaticResource YieldHeatCell}" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding InSpecPercent, StringFormat=F1, Mode=OneTime}" SortMemberPath="InSpecPercent" Width="70">
+                        <DataGridTextColumn IsReadOnly="True" CellStyle="{StaticResource YieldHeatCell}" ElementStyle="{StaticResource SummaryCellText}" Binding="{Binding InSpecPercent, StringFormat=F1, Mode=OneTime}" SortMemberPath="InSpecPercent" Width="70">
                             <DataGridTextColumn.Header>
                                 <StackPanel>
                                     <TextBlock Text="InSpec%" Style="{StaticResource ColHeaderLabel}" ToolTip="良率色标：0% 红色 → 50% 黄色 → 100% 绿色；无有效数值时不着色"/>

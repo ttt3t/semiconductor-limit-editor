@@ -32,7 +32,10 @@ public sealed class LimitRule : INotifyPropertyChanged
     [JsonIgnore] public bool LowChanged => NewLowText != Format(OriginalLow * DisplayFactor);
     [JsonIgnore] public bool HighChanged => NewHighText != Format(OriginalHigh * DisplayFactor);
     public static string Format(double? x) => x?.ToString("G17", CultureInfo.InvariantCulture) ?? "";
-    public (double? Low, double? High) Limits()
+    public string LowDisplayText => Functional ? "—" : NewLowText;
+    public string HighDisplayText => Functional ? "—" : NewHighText;
+    public (double? Low, double? High) Limits() => Limits(NewLowText, NewHighText);
+    public (double? Low, double? High) Limits(string lowText, string highText)
     {
         double? Read(string s, bool changed, double? original)
         {
@@ -45,7 +48,7 @@ public sealed class LimitRule : INotifyPropertyChanged
             if (!double.IsFinite(v)) throw new InvalidDataException($"{Name}：超出 STDF R*4 可写范围。");
             return v;
         }
-        var low = Read(NewLowText, LowChanged, OriginalLow); var high = Read(NewHighText, HighChanged, OriginalHigh);
+        var low = Read(lowText, lowText != Format(OriginalLow * DisplayFactor), OriginalLow); var high = Read(highText, highText != Format(OriginalHigh * DisplayFactor), OriginalHigh);
         if (low > high) throw new InvalidDataException($"{Name}：新 LSL 不能大于新 USL。");
         return (low, high);
     }
@@ -55,7 +58,12 @@ public sealed class LimitRule : INotifyPropertyChanged
     }
     public void Reset() { NewLowText = Format(OriginalLow * DisplayFactor); NewHighText = Format(OriginalHigh * DisplayFactor); }
     public event PropertyChangedEventHandler? PropertyChanged;
-    private void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); PropertyChanged?.Invoke(this, new(nameof(WritableLimitsText))); }
+    private void Changed([CallerMemberName] string? name = null)
+    {
+        PropertyChanged?.Invoke(this, new(name));
+        if (name == nameof(NewLowText)) PropertyChanged?.Invoke(this, new(nameof(LowDisplayText)));
+        if (name == nameof(NewHighText)) PropertyChanged?.Invoke(this, new(nameof(HighDisplayText)));
+    }
 }
 public sealed record BinPair(ushort SBin, ushort HBin);
 public sealed class RejudgeSettings

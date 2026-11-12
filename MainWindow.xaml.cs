@@ -63,7 +63,7 @@ public partial class MainWindow : Window
     private long _detailVersion;
     private bool _closing;
     private bool _detailPending;
-    internal bool CanReclaimMemory => !_closing && !_isBusy && !_detailPending && _detailGate.CurrentCount == 1
+    internal bool CanReclaimMemory => !_closing && !_isBusy && !_detailPending && _rejudgeCancellation == null && !_rejudgeTimer.IsEnabled && _detailGate.CurrentCount == 1
         && DgTestItems != null && !DgTestItems.IsScrollActive && !_filterTimer.IsEnabled;
 
     public MainWindow() : this(null) { }
@@ -269,7 +269,7 @@ public partial class MainWindow : Window
     private void UpdateWindowTitle()
     {
         string configName = string.IsNullOrWhiteSpace(_config.ConfigFileName) ? "未加载配置" : _config.ConfigFileName;
-        Title = $"Semiconductor Limit Editor · V3.0.0 | 当前数据：{_currentDataName} | 配置：{configName}";
+        Title = $"Semiconductor Limit Editor · V3.0.1 | 当前数据：{_currentDataName} | 配置：{configName}";
     }
 
     private void UpdateConfigInfo()
@@ -557,7 +557,7 @@ public partial class MainWindow : Window
     private sealed record PreparedAnalysis(CsvParseResult Data, List<string> Sites, List<TestItemSummary> Summaries,
         CsvParseResult Source, CsvParseResult Scope, IReadOnlyList<SampleRange> Ranges, SampleMatchMode Match, RejudgeSession Rejudge);
 
-    private Task<PreparedAnalysis> PrepareAnalysisAsync(CsvParseResult data, AnalyzerConfig config)
+    private Task<PreparedAnalysis> PrepareAnalysisAsync(CsvParseResult data, AnalyzerConfig config, RejudgeSession? overrideRejudge = null)
     {
         var mode = config.PreferGoodRetest ? RetestMode.Last : _retestMode;
         string definition = RetestPreference.Signature(config);
@@ -572,8 +572,8 @@ public partial class MainWindow : Window
             AnalysisOperation.CheckCancellation();
             using (ImportProgress.Stage(0, .1, "匹配芯片身份"))
                 data = RetestIdentityService.Prepare(data, config);
-            var rejudge = ReferenceEquals(data, _rejudge?.Data) ? _rejudge! : new RejudgeSession(data, _rejudgeSettings);
-            if (_rejudge != null && ReferenceEquals(data, _data) && !ReferenceEquals(rejudge, _rejudge)) LimitExportService.ApplyPlan(rejudge, _rejudge.Rules.Values);
+            var rejudge = overrideRejudge ?? (ReferenceEquals(data, _rejudge?.Data) ? _rejudge! : new RejudgeSession(data, _rejudgeSettings, AnalysisOperation.Token));
+            if (overrideRejudge == null && _rejudge != null && ReferenceEquals(data, _data) && !ReferenceEquals(rejudge, _rejudge)) LimitExportService.ApplyPlan(rejudge, _rejudge.Rules.Values);
             CsvParseResult scope, analysis;
             using (ImportProgress.Stage(.1, .3, "筛选数据"))
                 scope = ReferenceEquals(data, _scopeSource) && cachedScope != null ? cachedScope : SampleFilterService.Apply(data, ranges, mode, match, config);
@@ -583,6 +583,7 @@ public partial class MainWindow : Window
             {
                 var sites = CollectSites(scope.Items, scope.Records);
                 var summaries = SummaryService.Build(analysis.Items, sites, scope.Wafers, combine, combineWafers, config);
+                foreach (var summary in summaries) summary.Rule = rejudge.Rules[summary.Data.Id];
                 ImportProgress.Report(1, true);
                 return new PreparedAnalysis(analysis, sites, summaries, data, scope, ranges, match, rejudge);
             }
@@ -665,6 +666,8 @@ public partial class MainWindow : Window
     private void SetBusy(bool busy)
     {
         _isBusy = busy;
+        if (busy) StopRejudge();
+        else if (_rejudge != null && !_closing) ScheduleRejudge();
         BusyIndicator.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         MainToolbar.IsEnabled = MainContent.IsEnabled = !busy;
         BtnCancelOperation.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
@@ -1139,6 +1142,7 @@ public partial class MainWindow : Window
             dep = dep is Visual ? VisualTreeHelper.GetParent(dep) : LogicalTreeHelper.GetParent(dep);
 
         if (dep is not DataGridCell cell) return;
+        if (cell.Column is LimitValueColumn) return;
 
         string? text = cell.Content switch
         {

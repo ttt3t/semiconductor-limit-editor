@@ -1,0 +1,101 @@
+using System.Diagnostics;
+using System.Text;
+using SemiconductorCsvAnalyzer.Models;
+using SemiconductorCsvAnalyzer.Services;
+static class PerformanceProbe
+{
+    static int checks;
+    static void Check(bool condition, string message) { if (!condition) throw new Exception(message); checks++; Console.WriteLine("PASS " + message); }
+    static AnalyzerConfig Config() => new() { DataStartRow = 6, TestItemStartColumn = 8, TestNumberRow = 5, SBinColumn = 5, HBinColumn = 6, WaferColumn = 7 };
+    static string Fixture(string dir, int count, int columns)
+    {
+        Directory.CreateDirectory(dir); string path = Path.Combine(dir, "large.csv");
+        using var w = new StreamWriter(path, false, new UTF8Encoding(false), 65536);
+        void Header(string label, IEnumerable<string> values) => w.WriteLine(label + new string(',', 7) + string.Join(',', values));
+        w.WriteLine("SN,X,Y,Site,SBIN,HBIN,Wafer," + string.Join(',', Enumerable.Range(0, columns).Select(i => "T" + i)));
+        Header("LSL", Enumerable.Repeat("0", columns)); Header("USL", Enumerable.Repeat("2", columns)); Header("UNIT", Enumerable.Repeat("V", columns)); Header("NUM", Enumerable.Range(1, columns).Select(i => i.ToString()));
+        for (int row = 0; row < count; row++)
+        {
+            bool good = row % 20 != 0;
+            w.Write($"R{row},{row / 2},0,{1 + row % 2},{(good ? 1000 : 2000)},{(good ? 1 : 2)},W{row % 3},");
+            for (int col = 0; col < columns; col++) { if (col > 0) w.Write(','); w.Write(!good && col == 0 ? "3.000000" : "1.000000"); } w.WriteLine();
+        }
+        return path;
+    }
+    static void VerifyPreview(RejudgeSession session, IReadOnlyDictionary<string, RuleEdit> edits, IReadOnlyList<TestItemSummary> summaries, RejudgePreviewResult computed)
+    {
+        var states = session.ResolveEdits(edits); var results = session.Evaluate(snapshots: states);
+        var ids = RejudgeSession.Select(session.Data, results, RetestMode.Last, false).Select(r => r.RecordId).ToHashSet();
+        foreach (var s in summaries)
+        {
+            var rule = states[s.Data.Id]; int total = 0, old = 0, next = 0;
+            // Independent row-text oracle for a small sample, not the numeric fast path.
+            foreach (var row in session.Data.Records)
+            {
+                if (!ids.Contains(row.Id) || !s.IsCombined && s.Site != row.Site || !s.IsWaferCombined && s.Wafer != row.WaferId) continue;
+                if (!row.Measurements.TryGetValue(s.Data.Id, out var text) || !DatasetService.TryValue(text, out double value)) continue;
+                total++; if (!(value < s.Data.LowLimit || value > s.Data.HighLimit)) old++; if (!(value < rule.Low || value > rule.High)) next++;
+            }
+            string expected = total == 0 ? "—" : (100.0 * (next - old) / total).ToString("+0.00;-0.00;0.00") + " pp";
+            Check(computed.Items[s].Text == expected, "numeric preview matches row oracle for " + s.Data.Name + "/" + s.Site + "/" + s.Wafer + "/" + s.IsWaferCombined);
+        }
+    }
+    static int Main(string[] args)
+    {
+        try
+        {
+            string root = Path.GetFullPath(args[0]);
+            var settings = new RejudgeSettings { OriginalPass = new() { new(1000, 1) }, Pass = new(1000, 1), Fail = new(2000, 2) };
+            string smallPath = Fixture(Path.Combine(root, "small"), 80, 4);
+            using var operation = new AnalysisOperation();
+            var small = DataFileService.Parse(smallPath, Config()); using var smallLease = new DatasetLease(small.Records);
+            var smallSession = new RejudgeSession(small, settings); var rule = smallSession.Rules[small.Items[0].Id]; rule.NewHighText = "4";
+            var snapshots = smallSession.CaptureEdits(); var summaries = SummaryService.Build(small.Items, new[] { "1", "2" }, small.Wafers, true, true, Config());
+            // Include explicit site/wafer combinations as well as ALL rows.
+            summaries.AddRange(SummaryService.Build(small.Items, new[] { "1", "2" }, small.Wafers, false, false, Config()));
+            var p = RejudgePreview.Compute(smallSession, snapshots, summaries, small.Records, RetestMode.Last, false, null, default);
+            VerifyPreview(smallSession, snapshots, summaries, p);
+            rule.NewHighText = "0.5";
+            var frozen = RejudgePreview.Compute(smallSession, snapshots, summaries, small.Records, RetestMode.Last, false, p, default);
+            Check(frozen.Items.All(k => k.Value == p.Items[k.Key]), "immutable request ignores later GUI edits");
+            var latest = RejudgePreview.Compute(smallSession, smallSession.CaptureEdits(), summaries, small.Records, RetestMode.Last, false, p, default);
+            Check(latest.Items[summaries[0]].Text != p.Items[summaries[0]].Text, "new request uses latest committed edit");
+            var mailbox = new RejudgeProgress(); mailbox.Report(.5, "阶段 A"); mailbox.Report(.1, "阶段 B");
+            Check(mailbox.Latest.Fraction == .5, "progress never moves backward"); mailbox.Report(1, "计算完成，等待提交");
+            Check(mailbox.Latest.Fraction < 1, "worker cannot mark uncommitted results 100 percent"); mailbox.Complete(); Check(mailbox.Latest.Fraction == 1, "only successful UI commit completes progress");
+            var canceled = new CancellationToken(true); bool rejected = false;
+            try { RejudgePreview.Compute(smallSession, snapshots, summaries, small.Records, RetestMode.Last, false, p, canceled); } catch (OperationCanceledException) { rejected = true; }
+            Check(rejected, "cancellation stops the complete preview pipeline");
+            string largePath = Fixture(Path.Combine(root, "large"), 50000, 256);
+            var watch = Stopwatch.StartNew(); var data = DataFileService.Parse(largePath, Config()); using var lease = new DatasetLease(data.Records);
+            Console.WriteLine($"PERF import: {watch.Elapsed.TotalSeconds:F2}s, 50,000 records x 256 measurements (12.8 million cells)");
+            watch.Restart(); long before = GC.GetAllocatedBytesForCurrentThread(); var session = new RejudgeSession(data, settings);
+            long classifyBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            Console.WriteLine($"PERF classification: {watch.Elapsed.TotalSeconds:F2}s, {classifyBytes / 1048576.0:F2} MiB allocated");
+            Check(classifyBytes < 32L * 1048576, "reference classification does not allocate full raw rows per measurement");
+            var rows = SummaryService.Build(data.Items, new[] { "1", "2" }, data.Wafers, true, true, Config());
+            session.Rules[data.Items[0].Id].NewHighText = "4"; var edits = session.CaptureEdits(); var progress = new RejudgeProgress();
+            watch.Restart(); before = GC.GetAllocatedBytesForCurrentThread();
+            var result = RejudgePreview.Compute(session, edits, rows, data.Records, RetestMode.Last, false, null, default, progress.Report);
+            long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            Console.WriteLine($"PERF full preview: {watch.Elapsed.TotalSeconds:F2}s, {bytes / 1048576.0:F2} MiB allocated, working set {Process.GetCurrentProcess().WorkingSet64 / 1048576} MiB");
+            Check(bytes < 64L * 1048576, "12.8 million numeric comparisons stay within bounded transient allocation");
+            Check(result.Summary.Contains("恢复 2500") && result.Summary.Contains("100.00%"), "large preview recovers exactly 2,500 failing original records");
+            Check(progress.Latest.Fraction is > .9 and < 1, "large worker publishes real progress without prematurely completing");
+            session.Rules[data.Items[0].Id].NewHighText = "2"; before = GC.GetAllocatedBytesForCurrentThread(); watch.Restart();
+            var changed = RejudgePreview.Compute(session, session.CaptureEdits(), rows, data.Records, RetestMode.Last, false, result, default);
+            Console.WriteLine($"PERF one-item edit: {watch.Elapsed.TotalSeconds:F2}s, {(GC.GetAllocatedBytesForCurrentThread() - before) / 1048576.0:F2} MiB allocated");
+            Check(changed.Summary.Contains("恢复 0"), "incremental edit restores the correct DUT result");
+            var cts = new CancellationTokenSource(); bool stopped = false;
+            session.Rules[data.Items[1].Id].NewHighText = "0.5";
+            try { session.Evaluate(cts.Token, (_, _) => cts.Cancel()); } catch (OperationCanceledException) { stopped = true; }
+            Check(stopped, "mid-comparison cancellation interrupts a large run");
+            Check(session.Evaluate().Count(r => r.Grade == RejudgeGrade.Fail) == 50000, "canceled counters never corrupt the next calculation");
+            // The worker keeps source handles alive even after the owning UI dataset is replaced.
+            using var fork = lease.Fork(); lease.Dispose();
+            Check(data.Records[0].Measurements.Values.First() == "3.000000", "forked worker lease survives release of the UI dataset lease");
+            Console.WriteLine($"ALL {checks} REJUDGE PERFORMANCE CHECKS PASSED"); return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+}

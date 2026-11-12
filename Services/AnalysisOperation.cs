@@ -33,6 +33,18 @@ public sealed class AnalysisOperation : IDisposable
 public sealed class DatasetLease : IDisposable
 {
     private RawMeasurementStore[]? _stores;
+    private readonly object _gate = new();
+    private DatasetLease(RawMeasurementStore[] stores) => _stores = stores;
+    public DatasetLease Fork()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_stores == null, this);
+            var acquired = new List<RawMeasurementStore>(_stores.Length);
+            try { foreach (var store in _stores) { store.Acquire(); acquired.Add(store); } return new DatasetLease(acquired.ToArray()); }
+            catch { foreach (var store in acquired) store.Release(); throw; }
+        }
+    }
     public DatasetLease(IEnumerable<CsvRecord> records)
     {
         var acquired = new List<RawMeasurementStore>();
@@ -46,7 +58,10 @@ public sealed class DatasetLease : IDisposable
     }
     public void Dispose()
     {
-        var stores = Interlocked.Exchange(ref _stores, null);
-        if (stores != null) foreach (var store in stores) store.Release();
+        lock (_gate)
+        {
+            var stores = _stores; _stores = null;
+            if (stores != null) foreach (var store in stores) store.Release();
+        }
     }
 }
